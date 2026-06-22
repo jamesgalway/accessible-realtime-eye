@@ -1,0 +1,9 @@
+.git
+.env
+.env.*
+node_modules
+npm-debug.log*
+logs
+tmp
+cloudflare
+docs/aliyun-ticket-draft.txt
