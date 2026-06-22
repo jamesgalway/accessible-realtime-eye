@@ -12,6 +12,7 @@ const PUBLIC_DIR = path.join(ROOT, 'public');
 loadEnv(path.join(ROOT, '.env'));
 
 const PORT = Number(process.env.PORT || 8787);
+const HOST = process.env.HOST || '0.0.0.0';
 const AMAP_KEY = process.env.AMAP_KEY || '';
 const BAILIAN_API_KEY = process.env.BAILIAN_API_KEY || process.env.DASHSCOPE_API_KEY || '';
 const BAILIAN_BASE_URL = (process.env.BAILIAN_BASE_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1').replace(/\/$/, '');
@@ -69,8 +70,8 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
-  console.log(`Accessible navigation prototype is running on http://localhost:${PORT}`);
+server.listen(PORT, HOST, () => {
+  console.log(`Accessible navigation prototype is running on http://${HOST}:${PORT}`);
 });
 
 const browserRealtimeServer = new WebSocket.Server({ noServer: true, maxPayload: 900 * 1024 });
