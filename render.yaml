@@ -15,3 +15,9 @@ services:
         value: cn
       - key: BAILIAN_REALTIME_VOICE
         value: Tina
+      - key: BAILIAN_WEBRTC_ENDPOINT
+        value: llm-ws-ye3smbxl6p0m9pxi.cn-beijing.maas.aliyuncs.com
+      - key: DASHSCOPE_API_KEY
+        sync: false
+      - key: AMAP_KEY
+        sync: false
