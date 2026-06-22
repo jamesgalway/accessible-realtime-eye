@@ -268,16 +268,23 @@ async function exchangeWebRtcSdp(offerSdp, clientApiKey = '') {
 function createRealtimeProxy(browserSocket) {
   const upstreamUrl = buildRealtimeWebSocketUrl();
   const pendingMessages = [];
+  const connectionId = Math.random().toString(36).slice(2, 8);
+  const startedAt = Date.now();
   let apiKey = BAILIAN_API_KEY;
   let upstream = null;
   let upstreamOpen = false;
   let closed = false;
+  let clientEventCount = 0;
+  let upstreamMessageCount = 0;
+
+  console.log(`[realtime:${connectionId}] browser connected; serverKey=${apiKey ? 'yes' : 'no'}`);
 
   const closeBoth = () => {
     if (closed) {
       return;
     }
     closed = true;
+    console.log(`[realtime:${connectionId}] closed after ${Date.now() - startedAt}ms; clientEvents=${clientEventCount}; upstreamMessages=${upstreamMessageCount}`);
     if (browserSocket.readyState === WebSocket.OPEN) {
       browserSocket.close();
     }
@@ -291,6 +298,9 @@ function createRealtimeProxy(browserSocket) {
       return;
     }
 
+    const upstreamStartedAt = Date.now();
+    console.log(`[realtime:${connectionId}] opening upstream; pending=${pendingMessages.length}`);
+
     upstream = new WebSocket(upstreamUrl, {
       headers: {
         'Authorization': `Bearer ${apiKey}`
@@ -301,6 +311,7 @@ function createRealtimeProxy(browserSocket) {
 
     upstream.on('open', () => {
       upstreamOpen = true;
+      console.log(`[realtime:${connectionId}] upstream ready in ${Date.now() - upstreamStartedAt}ms; pending=${pendingMessages.length}`);
       safeSend(browserSocket, {
         type: 'proxy.ready',
         model: BAILIAN_REALTIME_MODEL,
@@ -313,12 +324,18 @@ function createRealtimeProxy(browserSocket) {
     });
 
     upstream.on('message', (message) => {
+      upstreamMessageCount += 1;
+      if (upstreamMessageCount === 1 || upstreamMessageCount % 50 === 0) {
+        const type = parseRealtimeEventType(message.toString()) || 'unknown';
+        console.log(`[realtime:${connectionId}] upstream message #${upstreamMessageCount}; type=${type}`);
+      }
       if (browserSocket.readyState === WebSocket.OPEN) {
         browserSocket.send(message.toString());
       }
     });
 
     upstream.on('error', (error) => {
+      console.log(`[realtime:${connectionId}] upstream error: ${error.message}`);
       safeSend(browserSocket, {
         type: 'proxy.error',
         message: `百炼实时连接错误：${error.message}`
@@ -326,6 +343,7 @@ function createRealtimeProxy(browserSocket) {
     });
 
     upstream.on('close', (code, reason) => {
+      console.log(`[realtime:${connectionId}] upstream closed; code=${code}; reason=${reason.toString()}`);
       safeSend(browserSocket, {
         type: 'proxy.closed',
         code,
@@ -349,16 +367,22 @@ function createRealtimeProxy(browserSocket) {
     const authApiKey = parseProxyAuthApiKey(text);
     if (authApiKey) {
       apiKey = authApiKey;
+      console.log(`[realtime:${connectionId}] client key received; length=${authApiKey.length}`);
       openUpstream();
       return;
     }
 
     if (!isAllowedRealtimeClientEvent(text)) {
+      console.log(`[realtime:${connectionId}] blocked client event`);
       safeSend(browserSocket, {
         type: 'proxy.error',
         message: '收到不允许转发的实时事件。'
       });
       return;
+    }
+    clientEventCount += 1;
+    if (clientEventCount === 1 || clientEventCount % 50 === 0) {
+      console.log(`[realtime:${connectionId}] client event #${clientEventCount}; type=${parseRealtimeEventType(text) || 'unknown'}; upstreamOpen=${upstreamOpen}`);
     }
     if (!apiKey) {
       safeSend(browserSocket, {
@@ -394,6 +418,15 @@ function parseProxyAuthApiKey(text) {
     return '';
   }
   return typeof data.apiKey === 'string' ? data.apiKey.trim() : '';
+}
+
+function parseRealtimeEventType(text) {
+  try {
+    const data = JSON.parse(text);
+    return typeof data?.type === 'string' ? data.type : '';
+  } catch {
+    return '';
+  }
 }
 
 function isAllowedRealtimeClientEvent(text) {
