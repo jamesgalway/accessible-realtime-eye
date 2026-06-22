@@ -82,6 +82,16 @@
           <option value="webrtc">WebRTC 通话，需百炼白名单 Endpoint</option>
         </select>
 
+        <label for="client-api-key">百炼 DashScope Key，临时测试用</label>
+        <input id="client-api-key" type="password" autocomplete="off" placeholder="只保存在当前手机浏览器，不会写入服务器">
+        <div class="button-row">
+          <button id="save-client-key" type="button">保存到本机浏览器</button>
+          <button id="clear-client-key" type="button">清除本机 Key</button>
+        </div>
+        <p class="hint">
+          如果 Render 后台没有读到 Key，可以先在手机这里填写。Key 会存在手机浏览器本地存储里，后端只在本次连接时临时使用。
+        </p>
+
         <label for="vision-question">当前确认目标</label>
         <select id="vision-question">
           <option value="请像视频通话一样持续观察，重点帮我确认目的地入口、门牌和招牌。">确认目的地入口</option>

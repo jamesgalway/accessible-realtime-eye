@@ -4,6 +4,7 @@ const AUDIO_INPUT_RATE = 16000;
 const AUDIO_OUTPUT_RATE = 24000;
 const AUDIO_SEND_BYTES = 3200;
 const VIDEO_FRAME_INTERVAL_MS = 1000;
+const CLIENT_API_KEY_STORAGE = 'accessibleNav.dashscopeKey';
 
 const appState = {
   origin: null,
@@ -33,6 +34,7 @@ const elements = {
   videoFrame: document.querySelector('#video-frame'),
   remoteAudio: document.querySelector('#remote-audio'),
   realtimeMode: document.querySelector('#realtime-mode'),
+  clientApiKey: document.querySelector('#client-api-key'),
   visionQuestion: document.querySelector('#vision-question')
 };
 
@@ -46,7 +48,10 @@ document.querySelector('#start-realtime').addEventListener('click', startRealtim
 document.querySelector('#send-context').addEventListener('click', sendRealtimeContext);
 document.querySelector('#stop-realtime').addEventListener('click', stopRealtime);
 document.querySelector('#speak-vision').addEventListener('click', () => speak(appState.lastVisionText || elements.visionOutput.textContent));
+document.querySelector('#save-client-key').addEventListener('click', saveClientApiKey);
+document.querySelector('#clear-client-key').addEventListener('click', clearClientApiKey);
 
+initializeClientApiKey();
 checkHealth();
 
 async function checkHealth() {
@@ -59,8 +64,8 @@ async function checkHealth() {
     const parts = [
       '后端已启动。',
       data.amapConfigured ? '高德 Key 已配置。' : '高德 Key 未配置，暂时不能真实规划路线。',
-      data.bailianConfigured ? '百炼 Key 已配置。' : '百炼 Key 未配置，实时慧眼不能连接模型。',
-      data.realtimeWebSocketConfigured ? 'WebSocket 实时流可用。' : 'WebSocket 实时流不可用。',
+      data.bailianConfigured ? '服务端百炼 Key 已配置。' : '服务端百炼 Key 未配置，可在手机页临时填写 Key 测试实时慧眼。',
+      data.realtimeWebSocketConfigured ? 'WebSocket 实时流可用。' : 'WebSocket 实时流需要手机临时 Key 或服务端 Key。',
       data.realtimeWebRtcConfigured ? 'WebRTC 通话 Endpoint 已配置。' : 'WebRTC 通话 Endpoint 未配置，需百炼白名单。'
     ];
     elements.health.textContent = parts.join('');
@@ -318,7 +323,13 @@ async function startWebSocketRealtime() {
   };
 
   socket.addEventListener('open', () => {
-    appendVisionLog('本机到后端的实时连接已打开，等待后端连接百炼。');
+    const apiKey = getClientApiKey();
+    if (apiKey) {
+      socket.send(JSON.stringify({ type: 'proxy.auth', apiKey }));
+      appendVisionLog('本机到后端的实时连接已打开，已发送手机临时 Key，等待后端连接百炼。');
+    } else {
+      appendVisionLog('本机到后端的实时连接已打开，等待后端连接百炼。如果服务端没有 Key，请先在页面填写并保存百炼 Key。');
+    }
   });
 
   socket.addEventListener('message', async (event) => {
@@ -413,7 +424,10 @@ async function startWebRtcRealtime() {
 
   const response = await fetch('/api/realtime/sdp', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/sdp' },
+    headers: {
+      'Content-Type': 'application/sdp',
+      'X-Client-DashScope-Key': getClientApiKey()
+    },
     body: peer.localDescription.sdp
   });
   const answerSdp = await response.text();
@@ -512,6 +526,11 @@ function sendRealtimeContext(options = {}) {
 }
 
 async function handleRealtimeServerEvent(message) {
+  if (message.type === 'proxy.need_key') {
+    appendVisionLog(message.message || '请先填写并保存百炼 Key，然后重新开始实时慧眼。');
+    return;
+  }
+
   if (message.type === 'proxy.ready') {
     appState.realtime.isReady = true;
     sendRealtimeContext({ quiet: true });
@@ -686,6 +705,35 @@ function appendVisionLog(text) {
     : text;
   elements.visionOutput.textContent = next;
   elements.visionOutput.scrollTop = elements.visionOutput.scrollHeight;
+}
+
+function initializeClientApiKey() {
+  const saved = localStorage.getItem(CLIENT_API_KEY_STORAGE) || '';
+  if (saved && elements.clientApiKey) {
+    elements.clientApiKey.value = saved;
+  }
+}
+
+function getClientApiKey() {
+  return (elements.clientApiKey?.value || '').trim();
+}
+
+function saveClientApiKey() {
+  const apiKey = getClientApiKey();
+  if (!apiKey) {
+    appendVisionLog('百炼 Key 为空，没有保存。');
+    return;
+  }
+  localStorage.setItem(CLIENT_API_KEY_STORAGE, apiKey);
+  appendVisionLog('已保存到当前手机浏览器。为安全起见，不会在页面上朗读 Key 内容。');
+}
+
+function clearClientApiKey() {
+  localStorage.removeItem(CLIENT_API_KEY_STORAGE);
+  if (elements.clientApiKey) {
+    elements.clientApiKey.value = '';
+  }
+  appendVisionLog('已清除当前手机浏览器保存的百炼 Key。');
 }
 
 async function apiGet(path) {

@@ -102,11 +102,12 @@ async function handleApi(req, res, requestUrl) {
       amapMinIntervalMs: AMAP_MIN_INTERVAL_MS,
       bailianVisionModel: BAILIAN_VISION_MODEL,
       realtimeWebSocketConfigured: Boolean(BAILIAN_API_KEY),
-      realtimeWebRtcConfigured: Boolean(BAILIAN_API_KEY && BAILIAN_WEBRTC_ENDPOINT),
+      realtimeWebRtcConfigured: Boolean(BAILIAN_WEBRTC_ENDPOINT),
       realtimeModel: BAILIAN_REALTIME_MODEL,
       realtimeRegion: BAILIAN_REALTIME_REGION,
       realtimeVoice: BAILIAN_REALTIME_VOICE,
-      note: '高德和百炼 Key 均只在后端使用，前端不会拿到 Key。'
+      clientApiKeySupported: true,
+      note: '高德 Key 只在后端使用。百炼 Key 可由后端环境变量提供，也可由测试手机临时发送给代理。'
     });
     return;
   }
@@ -115,7 +116,8 @@ async function handleApi(req, res, requestUrl) {
     sendJson(res, 200, {
       ok: true,
       webSocketConfigured: Boolean(BAILIAN_API_KEY),
-      webRtcConfigured: Boolean(BAILIAN_API_KEY && BAILIAN_WEBRTC_ENDPOINT),
+      webRtcConfigured: Boolean(BAILIAN_WEBRTC_ENDPOINT),
+      clientApiKeySupported: true,
       model: BAILIAN_REALTIME_MODEL,
       region: BAILIAN_REALTIME_REGION,
       voice: BAILIAN_REALTIME_VOICE,
@@ -127,7 +129,7 @@ async function handleApi(req, res, requestUrl) {
 
   if (req.method === 'POST' && requestUrl.pathname === '/api/realtime/sdp') {
     const offerSdp = await readTextBody(req, 1024 * 1024);
-    const answerSdp = await exchangeWebRtcSdp(offerSdp);
+    const answerSdp = await exchangeWebRtcSdp(offerSdp, getClientDashScopeKey(req));
     res.writeHead(200, {
       'Content-Type': 'application/sdp; charset=utf-8',
       'Cache-Control': 'no-store'
@@ -234,8 +236,9 @@ async function callAmap(endpoint, params) {
   });
 }
 
-async function exchangeWebRtcSdp(offerSdp) {
-  if (!BAILIAN_API_KEY) {
+async function exchangeWebRtcSdp(offerSdp, clientApiKey = '') {
+  const apiKey = clientApiKey || BAILIAN_API_KEY;
+  if (!apiKey) {
     throw httpError(500, '还没有配置 BAILIAN_API_KEY 或 DASHSCOPE_API_KEY。');
   }
   if (!BAILIAN_WEBRTC_ENDPOINT) {
@@ -249,7 +252,7 @@ async function exchangeWebRtcSdp(offerSdp) {
   const response = await fetchWithTimeout(url, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${BAILIAN_API_KEY}`,
+      'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/sdp'
     },
     body: offerSdp
@@ -263,27 +266,12 @@ async function exchangeWebRtcSdp(offerSdp) {
 }
 
 function createRealtimeProxy(browserSocket) {
-  if (!BAILIAN_API_KEY) {
-    safeSend(browserSocket, {
-      type: 'proxy.error',
-      message: '还没有配置 BAILIAN_API_KEY 或 DASHSCOPE_API_KEY。'
-    });
-    browserSocket.close(1011, 'missing api key');
-    return;
-  }
-
   const upstreamUrl = buildRealtimeWebSocketUrl();
   const pendingMessages = [];
+  let apiKey = BAILIAN_API_KEY;
+  let upstream = null;
   let upstreamOpen = false;
   let closed = false;
-
-  const upstream = new WebSocket(upstreamUrl, {
-    headers: {
-      'Authorization': `Bearer ${BAILIAN_API_KEY}`
-    },
-    perMessageDeflate: false,
-    maxPayload: 8 * 1024 * 1024
-  });
 
   const closeBoth = () => {
     if (closed) {
@@ -293,48 +281,78 @@ function createRealtimeProxy(browserSocket) {
     if (browserSocket.readyState === WebSocket.OPEN) {
       browserSocket.close();
     }
-    if (upstream.readyState === WebSocket.OPEN || upstream.readyState === WebSocket.CONNECTING) {
+    if (upstream && (upstream.readyState === WebSocket.OPEN || upstream.readyState === WebSocket.CONNECTING)) {
       upstream.close();
     }
   };
 
-  upstream.on('open', () => {
-    upstreamOpen = true;
-    safeSend(browserSocket, {
-      type: 'proxy.ready',
-      model: BAILIAN_REALTIME_MODEL,
-      voice: BAILIAN_REALTIME_VOICE,
-      transport: 'websocket'
-    });
-    while (pendingMessages.length > 0 && upstream.readyState === WebSocket.OPEN) {
-      upstream.send(pendingMessages.shift());
+  const openUpstream = () => {
+    if (closed || upstream || !apiKey) {
+      return;
     }
-  });
 
-  upstream.on('message', (message) => {
-    if (browserSocket.readyState === WebSocket.OPEN) {
-      browserSocket.send(message.toString());
-    }
-  });
-
-  upstream.on('error', (error) => {
-    safeSend(browserSocket, {
-      type: 'proxy.error',
-      message: `百炼实时连接错误：${error.message}`
+    upstream = new WebSocket(upstreamUrl, {
+      headers: {
+        'Authorization': `Bearer ${apiKey}`
+      },
+      perMessageDeflate: false,
+      maxPayload: 8 * 1024 * 1024
     });
-  });
 
-  upstream.on('close', (code, reason) => {
-    safeSend(browserSocket, {
-      type: 'proxy.closed',
-      code,
-      reason: reason.toString()
+    upstream.on('open', () => {
+      upstreamOpen = true;
+      safeSend(browserSocket, {
+        type: 'proxy.ready',
+        model: BAILIAN_REALTIME_MODEL,
+        voice: BAILIAN_REALTIME_VOICE,
+        transport: 'websocket'
+      });
+      while (pendingMessages.length > 0 && upstream.readyState === WebSocket.OPEN) {
+        upstream.send(pendingMessages.shift());
+      }
     });
-    closeBoth();
-  });
+
+    upstream.on('message', (message) => {
+      if (browserSocket.readyState === WebSocket.OPEN) {
+        browserSocket.send(message.toString());
+      }
+    });
+
+    upstream.on('error', (error) => {
+      safeSend(browserSocket, {
+        type: 'proxy.error',
+        message: `百炼实时连接错误：${error.message}`
+      });
+    });
+
+    upstream.on('close', (code, reason) => {
+      safeSend(browserSocket, {
+        type: 'proxy.closed',
+        code,
+        reason: reason.toString()
+      });
+      closeBoth();
+    });
+  };
+
+  if (apiKey) {
+    openUpstream();
+  } else {
+    safeSend(browserSocket, {
+      type: 'proxy.need_key',
+      message: '服务端没有百炼 Key。请在手机页面填写并保存百炼 DashScope Key，然后重新开始实时慧眼。'
+    });
+  }
 
   browserSocket.on('message', (message) => {
     const text = message.toString();
+    const authApiKey = parseProxyAuthApiKey(text);
+    if (authApiKey) {
+      apiKey = authApiKey;
+      openUpstream();
+      return;
+    }
+
     if (!isAllowedRealtimeClientEvent(text)) {
       safeSend(browserSocket, {
         type: 'proxy.error',
@@ -342,7 +360,14 @@ function createRealtimeProxy(browserSocket) {
       });
       return;
     }
-    if (upstreamOpen && upstream.readyState === WebSocket.OPEN) {
+    if (!apiKey) {
+      safeSend(browserSocket, {
+        type: 'proxy.need_key',
+        message: '缺少百炼 Key，实时事件还没有转发。'
+      });
+      return;
+    }
+    if (upstreamOpen && upstream?.readyState === WebSocket.OPEN) {
       upstream.send(text);
     } else {
       pendingMessages.push(text);
@@ -351,6 +376,24 @@ function createRealtimeProxy(browserSocket) {
 
   browserSocket.on('error', () => closeBoth());
   browserSocket.on('close', () => closeBoth());
+}
+
+function getClientDashScopeKey(req) {
+  const value = req.headers['x-client-dashscope-key'];
+  return Array.isArray(value) ? String(value[0] || '').trim() : String(value || '').trim();
+}
+
+function parseProxyAuthApiKey(text) {
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return '';
+  }
+  if (data?.type !== 'proxy.auth') {
+    return '';
+  }
+  return typeof data.apiKey === 'string' ? data.apiKey.trim() : '';
 }
 
 function isAllowedRealtimeClientEvent(text) {
