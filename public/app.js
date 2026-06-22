@@ -3,7 +3,7 @@
 const AUDIO_INPUT_RATE = 16000;
 const AUDIO_OUTPUT_RATE = 24000;
 const AUDIO_SEND_BYTES = 3200;
-const VIDEO_FRAME_INTERVAL_MS = 1000;
+const VIDEO_FRAME_INTERVAL_MS = 3000;
 const CLIENT_API_KEY_STORAGE = 'accessibleNav.dashscopeKey';
 
 const appState = {
@@ -511,9 +511,10 @@ function sendRealtimeContext(options = {}) {
       input_audio_format: 'pcm',
       output_audio_format: 'pcm',
       turn_detection: {
-        type: 'semantic_vad',
+        type: 'server_vad',
         threshold: 0.5,
-        silence_duration_ms: 800
+        silence_duration_ms: 500,
+        create_response: true
       },
       instructions: buildRealtimeInstructions()
     }
@@ -634,7 +635,7 @@ function sendVideoFrame() {
 
   const videoWidth = elements.camera.videoWidth || 1280;
   const videoHeight = elements.camera.videoHeight || 720;
-  const maxWidth = 640;
+  const maxWidth = 360;
   const scale = Math.min(1, maxWidth / videoWidth);
   const width = Math.round(videoWidth * scale);
   const height = Math.round(videoHeight * scale);
@@ -643,7 +644,7 @@ function sendVideoFrame() {
   elements.videoFrame.height = height;
   const context = elements.videoFrame.getContext('2d');
   context.drawImage(elements.camera, 0, 0, width, height);
-  const image = elements.videoFrame.toDataURL('image/jpeg', 0.68).replace(/^data:image\/jpeg;base64,/, '');
+  const image = elements.videoFrame.toDataURL('image/jpeg', 0.5).replace(/^data:image\/jpeg;base64,/, '');
 
   sendRealtimeEvent({
     type: 'input_image_buffer.append',
