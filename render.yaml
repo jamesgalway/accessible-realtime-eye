@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: accessible-realtime-eye
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: BAILIAN_REALTIME_MODEL
+        value: qwen3.5-omni-plus-realtime
+      - key: BAILIAN_REALTIME_REGION
+        value: cn
+      - key: BAILIAN_REALTIME_VOICE
+        value: Tina

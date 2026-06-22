@@ -1,0 +1,17 @@
+{
+  "name": "accessible-nav-prototype",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A mobile web prototype for accessible navigation with Amap routing and Bailian visual confirmation.",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node server.js --check"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

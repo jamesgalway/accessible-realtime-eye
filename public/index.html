@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>视障导航测试原型</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳到主要内容</a>
+
+    <header class="hero">
+      <p class="eyebrow">地图路线 + 摄像头确认</p>
+      <h1>视障导航网页测试原型</h1>
+      <p class="hero-text">
+        第一版用于验证工作流：高德提供路线和地点，百炼负责到站、到门口、到入口时的现场确认。
+      </p>
+      <div id="health" class="status-card" aria-live="polite">正在检查后端状态。</div>
+    </header>
+
+    <main id="main" class="layout">
+      <section class="panel" aria-labelledby="route-title">
+        <h2 id="route-title">1. 规划路线</h2>
+
+        <label for="city">城市</label>
+        <input id="city" value="上海" autocomplete="address-level2">
+
+        <label for="origin">起点地点或坐标</label>
+        <input id="origin" placeholder="例如：乐业公寓，或 121.000000,31.000000">
+
+        <div class="button-row">
+          <button id="use-location" type="button">用手机当前位置做起点</button>
+          <button id="search-origin" type="button">搜索起点</button>
+        </div>
+
+        <label for="destination">终点地点或坐标</label>
+        <input id="destination" placeholder="例如：上海市中医医院">
+
+        <div class="button-row">
+          <button id="search-destination" type="button">搜索终点</button>
+        </div>
+
+        <label for="mode">路线类型</label>
+        <select id="mode">
+          <option value="transit">公交加步行</option>
+          <option value="walking">只规划步行</option>
+        </select>
+
+        <button id="plan-route" class="primary" type="button">生成路线</button>
+
+        <div id="poi-results" class="results" aria-live="polite"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="manual-route-title">
+        <h2 id="manual-route-title">1.5 无 Key 测试路线</h2>
+        <p class="hint">
+          如果暂时没有高德 Web 服务 Key，可以把我通过高德 MCP 或人工核对得到的路线事实粘贴到这里。实时慧眼会把这段内容当作当前导航状态使用。
+        </p>
+        <label for="manual-route">手动路线事实</label>
+        <textarea id="manual-route" rows="9" placeholder="例如：起点、终点、公交线路、上车站、下车站、下车后需要找的入口、不能确认的点。"></textarea>
+        <button id="load-manual-route" class="primary" type="button">载入手动路线</button>
+      </section>
+
+      <section class="panel" aria-labelledby="route-output-title">
+        <h2 id="route-output-title">2. 路线结果</h2>
+        <p class="hint">
+          注意：高德原始指令还不是最终“左边、右边、过几次马路”的死规则成品。这里先把地图事实和路线骨架锁住，再交给现场确认流程。
+        </p>
+        <button id="speak-route" type="button">朗读路线结果</button>
+        <pre id="route-output" class="output" tabindex="0" aria-live="polite">还没有生成路线。</pre>
+      </section>
+
+      <section class="panel camera-panel" aria-labelledby="camera-title">
+        <h2 id="camera-title">3. 视频通话式慧眼确认</h2>
+        <p class="hint">
+          这里不用拍照按钮，而是打开摄像头和麦克风，持续把低频视频帧、语音和导航上下文送给百炼实时模型。
+        </p>
+
+        <label for="realtime-mode">实时接入方式</label>
+        <select id="realtime-mode">
+          <option value="websocket">WebSocket 实时流，适合先测试</option>
+          <option value="webrtc">WebRTC 通话，需百炼白名单 Endpoint</option>
+        </select>
+
+        <label for="vision-question">当前确认目标</label>
+        <select id="vision-question">
+          <option value="请像视频通话一样持续观察，重点帮我确认目的地入口、门牌和招牌。">确认目的地入口</option>
+          <option value="请像视频通话一样持续观察，重点帮我确认公交站牌和站名。">确认公交站牌</option>
+          <option value="请持续观察画面，重点找门牌号、招牌或医院门诊入口。">找门牌或招牌</option>
+          <option value="请结合导航状态和画面，判断目标大概在左前方、右前方还是正前方。">确认目标方向</option>
+        </select>
+
+        <div class="button-row">
+          <button id="start-realtime" class="primary" type="button">开始实时慧眼</button>
+          <button id="send-context" type="button">发送当前导航上下文</button>
+          <button id="stop-realtime" type="button">结束实时慧眼</button>
+        </div>
+
+        <video id="camera" playsinline muted aria-label="本地摄像头预览"></video>
+        <canvas id="video-frame" hidden></canvas>
+        <audio id="remote-audio" autoplay></audio>
+        <button id="speak-vision" type="button">朗读确认结果</button>
+        <pre id="vision-output" class="output" tabindex="0" aria-live="polite">还没有现场确认结果。</pre>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>原型原则：地图事实先锁定；摄像头只做现场确认；冲突时必须说不确定，不编路线。</p>
+    </footer>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
