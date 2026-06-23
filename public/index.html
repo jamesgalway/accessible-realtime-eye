@@ -118,6 +118,11 @@
           <button id="stop-realtime" type="button">结束实时慧眼</button>
         </div>
 
+        <label class="checkbox-line">
+          <input id="strong-echo-guard" type="checkbox">
+          强防回声模式：模型说话时临时关麦，会降低自我打断，但这时不能插话打断模型。
+        </label>
+
         <video id="camera" playsinline muted aria-label="本地摄像头预览"></video>
         <canvas id="video-frame" hidden></canvas>
         <audio id="remote-audio" autoplay></audio>

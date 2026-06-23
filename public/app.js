@@ -45,6 +45,7 @@ const elements = {
   clientApiKey: document.querySelector('#client-api-key'),
   clientWebRtcEndpoint: document.querySelector('#client-webrtc-endpoint'),
   visionQuestion: document.querySelector('#vision-question'),
+  strongEchoGuard: document.querySelector('#strong-echo-guard'),
   copyRealtimeLog: document.querySelector('#copy-realtime-log')
 };
 
@@ -686,6 +687,10 @@ function setLocalMicrophoneEnabled(enabled, reason = '') {
 }
 
 function muteMicrophoneWhileAssistantSpeaks(reason) {
+  if (!elements.strongEchoGuard?.checked) {
+    recordRealtimeDebug('mic.kept_enabled', `${reason}; strong echo guard off`);
+    return;
+  }
   if (appState.assistantMicMuteTimer) {
     clearTimeout(appState.assistantMicMuteTimer);
   }
