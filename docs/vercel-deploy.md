@@ -7,6 +7,10 @@
 ## 当前代码状态
 
 - GitHub 仓库：`jamesgalway/accessible-realtime-eye`
+- Vercel 项目：`accessible-realtime-eye`
+- 正式访问域名：`https://accessible-realtime-eye.vercel.app/`
+- 当前已验证：正式首页返回 200，`/api/health` 返回 `ok: true`
+- 最新修复提交：`fe5c2e2`
 - 已加入 Vercel 入口：`vercel.json`
 - 已加入 API Functions：`api/`
 - 本地普通 HTTP 服务仍可用：`node server.js`
@@ -27,6 +31,8 @@
 - 本项目更稳的优先路径是 WebRTC：浏览器和百炼建立实时媒体链路，后端只做 SDP 交换，不长期承载音视频转发。
 - WebSocket 实时流仍保留，用于测试和兜底，但上线后需要实测 Vercel 对长连接的稳定性。
 - 当前本机 Vercel CLI 无法完成登录，错误发生在 CLI 访问 Vercel OpenID 配置时；浏览器访问 Vercel 正常。
+- 第一次部署后出现 500，原因是 Vercel 把根目录 `server.js` 当作 Node 函数入口，而它默认导出的是对象。已改为默认导出 HTTP handler，同时保留附加属性给 API 文件使用。
+- 当前服务端没有配置 `AMAP_KEY`、`BAILIAN_API_KEY`、`DASHSCOPE_API_KEY`。测试实时百炼时先在手机页面临时填写 DashScope Key；高德路线功能需要后续补 `AMAP_KEY`。
 
 ## 主动回复功能设计
 
@@ -49,4 +55,3 @@
 - 过马路相关指令必须保守，必要时要求现场确认。
 - 主动提醒必须有冷却时间，避免频繁打断。
 - 模型输出要带置信度和依据，不能编造地图或画面里没有的信息。
-
