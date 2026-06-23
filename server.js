@@ -478,7 +478,13 @@ function normalizeBailianEndpoint(endpoint) {
   if (!url.hostname.endsWith('.maas.aliyuncs.com')) {
     throw httpError(400, '百炼 WebRTC Endpoint 必须是阿里云 maas.aliyuncs.com 域名。');
   }
+  url.hostname = normalizeBailianWebRtcHostname(url.hostname);
   return `${url.hostname}${url.pathname && url.pathname !== '/' ? url.pathname : ''}`;
+}
+
+function normalizeBailianWebRtcHostname(hostname) {
+  // Aliyun support confirmed the WebRTC workspace endpoint may omit the earlier "llm-" prefix.
+  return hostname.startsWith('llm-ws-') ? hostname.replace(/^llm-/, '') : hostname;
 }
 
 function parseProxyAuthApiKey(text) {
@@ -548,6 +554,7 @@ function buildWebRtcUrl(endpoint = BAILIAN_WEBRTC_ENDPOINT) {
     ? trimmed
     : `https://${trimmed}`;
   const url = new URL(endpointUrl);
+  url.hostname = normalizeBailianWebRtcHostname(url.hostname);
   if (!url.pathname || url.pathname === '/') {
     url.pathname = '/api/v1/webrtc/realtime';
   }
