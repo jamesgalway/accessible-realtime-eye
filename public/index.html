@@ -82,17 +82,27 @@
           <option value="websocket" disabled>WebSocket 实时流，当前 Vercel 部署不可用</option>
         </select>
 
-        <label for="client-api-key">百炼 DashScope Key，临时测试用</label>
-        <input id="client-api-key" type="password" autocomplete="off" placeholder="只保存在当前手机浏览器，不会写入服务器">
-        <label for="client-webrtc-endpoint">百炼 WebRTC Endpoint，临时测试用</label>
-        <input id="client-webrtc-endpoint" type="text" autocomplete="off" placeholder="例如 llm-业务空间ID.cn-beijing.maas.aliyuncs.com">
-        <div class="button-row">
-          <button id="save-client-key" type="button">保存 Key 和 Endpoint 到本机</button>
-          <button id="clear-client-key" type="button">清除本机 Key 和 Endpoint</button>
-        </div>
-        <p class="hint">
-          如果 Key 和 Endpoint 不属于同一个百炼业务空间，WebRTC 会报 Workspace endpoint access denied。这里填写的内容只存在手机浏览器本地，后端只在本次连接时临时使用。
+        <p id="realtime-config-status" class="ready-note" aria-live="polite">
+          正在检查百炼后台配置。
         </p>
+
+        <details id="advanced-realtime-config" class="advanced-config">
+          <summary>高级调试：临时覆盖百炼 Key 和 Endpoint</summary>
+          <p class="hint">
+            正常测试不用填写这里。只有后台 Key 或 Endpoint 失效时，才展开这里临时覆盖。
+          </p>
+          <label for="client-api-key">百炼 DashScope Key，临时测试用</label>
+          <input id="client-api-key" type="password" autocomplete="off" placeholder="只保存在当前手机浏览器，不会写入服务器">
+          <label for="client-webrtc-endpoint">百炼 WebRTC Endpoint，临时测试用</label>
+          <input id="client-webrtc-endpoint" type="text" autocomplete="off" placeholder="例如 llm-业务空间ID.cn-beijing.maas.aliyuncs.com">
+          <div class="button-row">
+            <button id="save-client-key" type="button">保存 Key 和 Endpoint 到本机</button>
+            <button id="clear-client-key" type="button">清除本机 Key 和 Endpoint</button>
+          </div>
+          <p class="hint">
+            如果 Key 和 Endpoint 不属于同一个百炼业务空间，WebRTC 会报 Workspace endpoint access denied。这里的内容只在展开高级调试时覆盖后台配置。
+          </p>
+        </details>
 
         <label for="vision-question">当前确认目标</label>
         <select id="vision-question">

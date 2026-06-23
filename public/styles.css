@@ -183,6 +183,30 @@ h2 {
   color: var(--muted);
 }
 
+.ready-note {
+  margin: 1rem 0 0;
+  padding: 0.75rem;
+  border: 2px solid var(--accent);
+  border-radius: 0.8rem;
+  background: #e8f5f2;
+  color: var(--accent-strong);
+  font-weight: 800;
+}
+
+.advanced-config {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  border: 2px dashed rgba(47, 42, 31, 0.55);
+  border-radius: 0.9rem;
+  background: #fffdf8;
+}
+
+.advanced-config summary {
+  min-height: 2.8rem;
+  cursor: pointer;
+  font-weight: 800;
+}
+
 .results {
   margin-top: 1rem;
 }

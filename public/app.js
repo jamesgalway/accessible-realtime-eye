@@ -35,6 +35,8 @@ const elements = {
   videoFrame: document.querySelector('#video-frame'),
   remoteAudio: document.querySelector('#remote-audio'),
   realtimeMode: document.querySelector('#realtime-mode'),
+  realtimeConfigStatus: document.querySelector('#realtime-config-status'),
+  advancedRealtimeConfig: document.querySelector('#advanced-realtime-config'),
   clientApiKey: document.querySelector('#client-api-key'),
   clientWebRtcEndpoint: document.querySelector('#client-webrtc-endpoint'),
   visionQuestion: document.querySelector('#vision-question')
@@ -68,16 +70,18 @@ async function checkHealth() {
       clientApiKeySupported: data.clientApiKeySupported
     };
     selectRecommendedRealtimeMode(appState.realtimeConfig);
+    updateRealtimeConfigStatus(appState.realtimeConfig);
     const parts = [
       '后端已启动。',
       data.amapConfigured ? '高德 Key 已配置。' : '高德 Key 未配置，暂时不能真实规划路线。',
-      data.bailianConfigured ? '服务端百炼 Key 已配置。' : '服务端百炼 Key 未配置，可在手机页临时填写 Key 测试实时慧眼。',
+      data.bailianConfigured ? '服务端百炼 Key 已配置，手机端无需填写 Key。' : '服务端百炼 Key 未配置，可展开高级调试临时填写 Key。',
       '当前 Vercel 部署不使用 WebSocket 长连接。',
-      data.realtimeWebRtcConfigured ? 'WebRTC Endpoint 已配置；如果报权限错误，请在手机页填写同一业务空间的 Endpoint。' : 'WebRTC Endpoint 未配置，需填写百炼白名单 Endpoint。'
+      data.realtimeWebRtcConfigured ? 'WebRTC Endpoint 已配置，手机端无需填写 Endpoint。' : 'WebRTC Endpoint 未配置，需展开高级调试填写白名单 Endpoint。'
     ];
     elements.health.textContent = parts.join('');
   } catch (error) {
     elements.health.textContent = `后端状态检查失败：${error.message}`;
+    updateRealtimeConfigStatus(null);
   }
 }
 
@@ -432,11 +436,7 @@ async function startWebRtcRealtime() {
 
   const response = await fetch('/api/realtime/sdp', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/sdp',
-      'X-Client-DashScope-Key': getClientApiKey(),
-      'X-Client-Bailian-Endpoint': getClientWebRtcEndpoint()
-    },
+    headers: getRealtimeSdpHeaders(),
     body: peer.localDescription.sdp
   });
   const answerSdp = await response.text();
@@ -449,6 +449,7 @@ async function startWebRtcRealtime() {
 async function getRealtimeConfig() {
   const config = await apiGet('/api/realtime/config');
   appState.realtimeConfig = config;
+  updateRealtimeConfigStatus(config);
   return config;
 }
 
@@ -470,15 +471,15 @@ function resolveRealtimeMode(config) {
 }
 
 function ensureRealtimeCanStart(mode, config) {
-  const hasClientKey = Boolean(getClientApiKey());
-  const hasClientEndpoint = Boolean(getClientWebRtcEndpoint());
   const hasServerKey = Boolean(config.serverApiKeyConfigured || config.webSocketConfigured);
   const hasServerEndpoint = Boolean(config.webRtcConfigured);
+  const hasClientKey = Boolean(readClientApiKey());
+  const hasClientEndpoint = Boolean(readClientWebRtcEndpoint());
   if (mode === 'webrtc' && !hasClientKey && !hasServerKey) {
-    throw new Error('请先在“百炼 DashScope Key”输入框填写并保存临时 Key，再开始实时慧眼。当前服务端没有保存百炼 Key。');
+    throw new Error('服务端没有保存百炼 Key。请展开高级调试，临时填写并保存百炼 DashScope Key。');
   }
   if (mode === 'webrtc' && !hasClientEndpoint && !hasServerEndpoint) {
-    throw new Error('请先填写百炼 WebRTC Endpoint。格式通常是 llm-业务空间ID.cn-beijing.maas.aliyuncs.com。');
+    throw new Error('服务端没有保存百炼 WebRTC Endpoint。请展开高级调试填写白名单 Endpoint。');
   }
 }
 
@@ -496,7 +497,7 @@ function formatRealtimeStartError(message) {
     return [
       '百炼拒绝了当前 WebRTC Endpoint。',
       '这通常不是手机或摄像头问题，而是 DashScope Key 和 WebRTC Endpoint 不属于同一个百炼业务空间，或该 Key 没有这个 Workspace Endpoint 的权限。',
-      '临时测试请把“实时接入方式”改成 WebSocket 实时流；要修 WebRTC，需要在百炼控制台确认 Key、Workspace ID、Endpoint 三者属于同一个业务空间。'
+      '要修 WebRTC，需要在百炼控制台确认 Key、Workspace ID、Endpoint 三者属于同一个业务空间。'
     ].join('');
   }
   return message;
@@ -784,17 +785,67 @@ function initializeClientApiKey() {
   }
 }
 
-function getClientApiKey() {
+function readClientApiKey() {
   return (elements.clientApiKey?.value || '').trim();
 }
 
-function getClientWebRtcEndpoint() {
+function readClientWebRtcEndpoint() {
   return (elements.clientWebRtcEndpoint?.value || '').trim();
 }
 
-function saveClientApiKey() {
+function shouldUseClientRealtimeOverride() {
+  const config = appState.realtimeConfig;
+  if (elements.advancedRealtimeConfig?.open) {
+    return true;
+  }
+  return !config?.serverApiKeyConfigured || !config?.webRtcConfigured;
+}
+
+function getClientApiKey() {
+  return shouldUseClientRealtimeOverride() ? readClientApiKey() : '';
+}
+
+function getClientWebRtcEndpoint() {
+  return shouldUseClientRealtimeOverride() ? readClientWebRtcEndpoint() : '';
+}
+
+function getRealtimeSdpHeaders() {
+  const headers = { 'Content-Type': 'application/sdp' };
   const apiKey = getClientApiKey();
   const endpoint = getClientWebRtcEndpoint();
+  if (apiKey) {
+    headers['X-Client-DashScope-Key'] = apiKey;
+  }
+  if (endpoint) {
+    headers['X-Client-Bailian-Endpoint'] = endpoint;
+  }
+  return headers;
+}
+
+function updateRealtimeConfigStatus(config) {
+  if (!elements.realtimeConfigStatus) {
+    return;
+  }
+  if (!config) {
+    elements.realtimeConfigStatus.textContent = '暂时无法确认百炼后台配置。';
+    return;
+  }
+  if (config.serverApiKeyConfigured && config.webRtcConfigured) {
+    elements.realtimeConfigStatus.textContent = '百炼后台已配置 Key 和 WebRTC Endpoint。手机端无需填写，直接点“开始实时慧眼”。';
+    return;
+  }
+  if (!config.serverApiKeyConfigured && !config.webRtcConfigured) {
+    elements.realtimeConfigStatus.textContent = '百炼后台还没有配置 Key 和 Endpoint。需要展开高级调试临时填写。';
+    return;
+  }
+  elements.realtimeConfigStatus.textContent = config.serverApiKeyConfigured
+    ? '百炼后台已有 Key，但缺少 WebRTC Endpoint。需要展开高级调试临时填写 Endpoint。'
+    : '百炼后台已有 WebRTC Endpoint，但缺少 Key。需要展开高级调试临时填写 Key。';
+}
+
+function saveClientApiKey() {
+  const apiKey = readClientApiKey();
+  const endpoint = readClientWebRtcEndpoint();
   if (!apiKey && !endpoint) {
     appendVisionLog('百炼 Key 和 Endpoint 都为空，没有保存。');
     return;
