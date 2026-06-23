@@ -5,6 +5,7 @@ const AUDIO_OUTPUT_RATE = 24000;
 const AUDIO_SEND_BYTES = 3200;
 const VIDEO_FRAME_INTERVAL_MS = 3000;
 const CLIENT_API_KEY_STORAGE = 'accessibleNav.dashscopeKey';
+const CLIENT_WEBRTC_ENDPOINT_STORAGE = 'accessibleNav.webrtcEndpoint';
 
 const appState = {
   origin: null,
@@ -35,6 +36,7 @@ const elements = {
   remoteAudio: document.querySelector('#remote-audio'),
   realtimeMode: document.querySelector('#realtime-mode'),
   clientApiKey: document.querySelector('#client-api-key'),
+  clientWebRtcEndpoint: document.querySelector('#client-webrtc-endpoint'),
   visionQuestion: document.querySelector('#vision-question')
 };
 
@@ -70,8 +72,8 @@ async function checkHealth() {
       '后端已启动。',
       data.amapConfigured ? '高德 Key 已配置。' : '高德 Key 未配置，暂时不能真实规划路线。',
       data.bailianConfigured ? '服务端百炼 Key 已配置。' : '服务端百炼 Key 未配置，可在手机页临时填写 Key 测试实时慧眼。',
-      data.realtimeWebSocketConfigured ? 'WebSocket 实时流可用。' : 'WebSocket 实时流需要手机临时 Key 或服务端 Key。',
-      data.realtimeWebRtcConfigured ? 'WebRTC 通话 Endpoint 已配置。' : 'WebRTC 通话 Endpoint 未配置，需百炼白名单。'
+      '当前 Vercel 部署不使用 WebSocket 长连接。',
+      data.realtimeWebRtcConfigured ? 'WebRTC Endpoint 已配置；如果报权限错误，请在手机页填写同一业务空间的 Endpoint。' : 'WebRTC Endpoint 未配置，需填写百炼白名单 Endpoint。'
     ];
     elements.health.textContent = parts.join('');
   } catch (error) {
@@ -432,7 +434,8 @@ async function startWebRtcRealtime() {
     method: 'POST',
     headers: {
       'Content-Type': 'application/sdp',
-      'X-Client-DashScope-Key': getClientApiKey()
+      'X-Client-DashScope-Key': getClientApiKey(),
+      'X-Client-Bailian-Endpoint': getClientWebRtcEndpoint()
     },
     body: peer.localDescription.sdp
   });
@@ -460,22 +463,22 @@ function selectRecommendedRealtimeMode(config) {
 
 function resolveRealtimeMode(config) {
   const requested = elements.realtimeMode.value;
-  if (requested === 'webrtc' && !config.webRtcConfigured && config.webSocketConfigured) {
-    appendVisionLog('WebRTC Endpoint 未配置，已自动切换到 WebSocket 实时流。');
-    elements.realtimeMode.value = 'websocket';
-    return 'websocket';
+  if (requested === 'websocket') {
+    throw new Error('当前 Vercel 部署不能稳定承载 WebSocket 长连接，请先使用 WebRTC，并确认 Key 和 Endpoint 属于同一个百炼业务空间。');
   }
   return requested;
 }
 
 function ensureRealtimeCanStart(mode, config) {
   const hasClientKey = Boolean(getClientApiKey());
+  const hasClientEndpoint = Boolean(getClientWebRtcEndpoint());
   const hasServerKey = Boolean(config.serverApiKeyConfigured || config.webSocketConfigured);
+  const hasServerEndpoint = Boolean(config.webRtcConfigured);
   if (mode === 'webrtc' && !hasClientKey && !hasServerKey) {
     throw new Error('请先在“百炼 DashScope Key”输入框填写并保存临时 Key，再开始实时慧眼。当前服务端没有保存百炼 Key。');
   }
-  if (mode === 'websocket' && !hasClientKey && !hasServerKey) {
-    throw new Error('WebSocket 备用测试需要先在“百炼 DashScope Key”输入框填写并保存临时 Key。当前服务端没有保存百炼 Key。');
+  if (mode === 'webrtc' && !hasClientEndpoint && !hasServerEndpoint) {
+    throw new Error('请先填写百炼 WebRTC Endpoint。格式通常是 llm-业务空间ID.cn-beijing.maas.aliyuncs.com。');
   }
 }
 
@@ -775,28 +778,46 @@ function initializeClientApiKey() {
   if (saved && elements.clientApiKey) {
     elements.clientApiKey.value = saved;
   }
+  const savedEndpoint = localStorage.getItem(CLIENT_WEBRTC_ENDPOINT_STORAGE) || '';
+  if (savedEndpoint && elements.clientWebRtcEndpoint) {
+    elements.clientWebRtcEndpoint.value = savedEndpoint;
+  }
 }
 
 function getClientApiKey() {
   return (elements.clientApiKey?.value || '').trim();
 }
 
+function getClientWebRtcEndpoint() {
+  return (elements.clientWebRtcEndpoint?.value || '').trim();
+}
+
 function saveClientApiKey() {
   const apiKey = getClientApiKey();
-  if (!apiKey) {
-    appendVisionLog('百炼 Key 为空，没有保存。');
+  const endpoint = getClientWebRtcEndpoint();
+  if (!apiKey && !endpoint) {
+    appendVisionLog('百炼 Key 和 Endpoint 都为空，没有保存。');
     return;
   }
-  localStorage.setItem(CLIENT_API_KEY_STORAGE, apiKey);
-  appendVisionLog('已保存到当前手机浏览器。为安全起见，不会在页面上朗读 Key 内容。');
+  if (apiKey) {
+    localStorage.setItem(CLIENT_API_KEY_STORAGE, apiKey);
+  }
+  if (endpoint) {
+    localStorage.setItem(CLIENT_WEBRTC_ENDPOINT_STORAGE, endpoint);
+  }
+  appendVisionLog('已保存到当前手机浏览器。为安全起见，不会在页面上朗读 Key 或 Endpoint 内容。');
 }
 
 function clearClientApiKey() {
   localStorage.removeItem(CLIENT_API_KEY_STORAGE);
+  localStorage.removeItem(CLIENT_WEBRTC_ENDPOINT_STORAGE);
   if (elements.clientApiKey) {
     elements.clientApiKey.value = '';
   }
-  appendVisionLog('已清除当前手机浏览器保存的百炼 Key。');
+  if (elements.clientWebRtcEndpoint) {
+    elements.clientWebRtcEndpoint.value = '';
+  }
+  appendVisionLog('已清除当前手机浏览器保存的百炼 Key 和 Endpoint。');
 }
 
 async function apiGet(path) {

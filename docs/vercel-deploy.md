@@ -35,6 +35,7 @@
 - 当前服务端没有配置 `AMAP_KEY`、`BAILIAN_API_KEY`、`DASHSCOPE_API_KEY`。测试实时百炼时先在手机页面临时填写 DashScope Key；高德路线功能需要后续补 `AMAP_KEY`。
 - 2026-06-23 修复“开始慧眼后报错关闭”：线上默认改为 WebRTC 通话，不再默认走 WebSocket；如果服务端没有百炼 Key 且手机页面没有临时 Key，会在调用摄像头前直接提示先填写 Key，避免打开后立即关闭。
 - 2026-06-23 继续修复 WebRTC `Endpoint.AccessDenied`：这是百炼 Workspace Endpoint 权限拒绝，说明手机临时 DashScope Key 和当前 WebRTC Endpoint 可能不在同一个业务空间，或 Key 没有 Endpoint 权限。已允许用户手动选择 WebSocket 备用测试，不再在启动时强制切回 WebRTC。
+- 2026-06-23 再次调整：Vercel 上的 WebSocket 握手超时，不能作为当前可用测试路径。页面新增手机端临时填写 WebRTC Endpoint，后端只允许 `*.maas.aliyuncs.com`，用于测试 Key 和 Endpoint 属于同一百炼业务空间的组合。
 
 ## 主动回复功能设计
 

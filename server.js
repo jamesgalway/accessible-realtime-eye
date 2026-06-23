@@ -174,7 +174,7 @@ async function handleApi(req, res, requestUrl) {
 
   if (req.method === 'POST' && requestUrl.pathname === '/api/realtime/sdp') {
     const offerSdp = await readTextBody(req, 1024 * 1024);
-    const answerSdp = await exchangeWebRtcSdp(offerSdp, getClientDashScopeKey(req));
+    const answerSdp = await exchangeWebRtcSdp(offerSdp, getClientDashScopeKey(req), getClientBailianEndpoint(req));
     res.writeHead(200, {
       'Content-Type': 'application/sdp; charset=utf-8',
       'Cache-Control': 'no-store'
@@ -281,19 +281,20 @@ async function callAmap(endpoint, params) {
   });
 }
 
-async function exchangeWebRtcSdp(offerSdp, clientApiKey = '') {
+async function exchangeWebRtcSdp(offerSdp, clientApiKey = '', clientEndpoint = '') {
   const apiKey = clientApiKey || BAILIAN_API_KEY;
+  const endpoint = clientEndpoint || BAILIAN_WEBRTC_ENDPOINT;
   if (!apiKey) {
     throw httpError(500, '还没有配置 BAILIAN_API_KEY 或 DASHSCOPE_API_KEY。');
   }
-  if (!BAILIAN_WEBRTC_ENDPOINT) {
+  if (!endpoint) {
     throw httpError(500, '还没有配置 BAILIAN_WEBRTC_ENDPOINT。百炼 WebRTC 接入需要官方白名单 Endpoint。');
   }
   if (!offerSdp || !offerSdp.includes('v=0')) {
     throw httpError(400, '没有收到有效的 WebRTC offer SDP。');
   }
 
-  const url = buildWebRtcUrl();
+  const url = buildWebRtcUrl(endpoint);
   const response = await fetchWithTimeout(url, {
     method: 'POST',
     headers: {
@@ -452,6 +453,34 @@ function getClientDashScopeKey(req) {
   return Array.isArray(value) ? String(value[0] || '').trim() : String(value || '').trim();
 }
 
+function getClientBailianEndpoint(req) {
+  const value = req.headers['x-client-bailian-endpoint'];
+  const endpoint = Array.isArray(value) ? String(value[0] || '').trim() : String(value || '').trim();
+  if (!endpoint) {
+    return '';
+  }
+  return normalizeBailianEndpoint(endpoint);
+}
+
+function normalizeBailianEndpoint(endpoint) {
+  const candidate = endpoint.startsWith('http://') || endpoint.startsWith('https://')
+    ? endpoint
+    : `https://${endpoint}`;
+  let url;
+  try {
+    url = new URL(candidate);
+  } catch {
+    throw httpError(400, '百炼 WebRTC Endpoint 格式不正确。');
+  }
+  if (url.protocol !== 'https:') {
+    throw httpError(400, '百炼 WebRTC Endpoint 必须使用 HTTPS。');
+  }
+  if (!url.hostname.endsWith('.maas.aliyuncs.com')) {
+    throw httpError(400, '百炼 WebRTC Endpoint 必须是阿里云 maas.aliyuncs.com 域名。');
+  }
+  return `${url.hostname}${url.pathname && url.pathname !== '/' ? url.pathname : ''}`;
+}
+
 function parseProxyAuthApiKey(text) {
   let data;
   try {
@@ -513,12 +542,12 @@ function buildRealtimeWebSocketUrl() {
   return url.toString();
 }
 
-function buildWebRtcUrl() {
-  const trimmed = BAILIAN_WEBRTC_ENDPOINT.trim();
-  const endpoint = trimmed.startsWith('http://') || trimmed.startsWith('https://')
+function buildWebRtcUrl(endpoint = BAILIAN_WEBRTC_ENDPOINT) {
+  const trimmed = endpoint.trim();
+  const endpointUrl = trimmed.startsWith('http://') || trimmed.startsWith('https://')
     ? trimmed
     : `https://${trimmed}`;
-  const url = new URL(endpoint);
+  const url = new URL(endpointUrl);
   if (!url.pathname || url.pathname === '/') {
     url.pathname = '/api/v1/webrtc/realtime';
   }
