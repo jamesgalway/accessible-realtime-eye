@@ -281,7 +281,6 @@ async function startRealtime() {
 
   try {
     const config = await getRealtimeConfig();
-    selectRecommendedRealtimeMode(config);
     const mode = resolveRealtimeMode(config);
     ensureRealtimeCanStart(mode, config);
     appendVisionLog(`正在启动${mode === 'webrtc' ? 'WebRTC 通话' : 'WebSocket 实时流'}，请允许摄像头和麦克风。`);
@@ -308,7 +307,7 @@ async function startRealtime() {
       await startWebSocketRealtime();
     }
   } catch (error) {
-    appendVisionLog(`实时慧眼启动失败：${error.message}`);
+    appendVisionLog(`实时慧眼启动失败：${formatRealtimeStartError(error.message)}`);
     stopRealtime();
   }
 }
@@ -461,10 +460,10 @@ function selectRecommendedRealtimeMode(config) {
 
 function resolveRealtimeMode(config) {
   const requested = elements.realtimeMode.value;
-  if (requested === 'websocket' && !config.webSocketConfigured && config.webRtcConfigured) {
-    appendVisionLog('线上部署优先使用 WebRTC 通话，已自动从 WebSocket 切换到 WebRTC。');
-    elements.realtimeMode.value = 'webrtc';
-    return 'webrtc';
+  if (requested === 'webrtc' && !config.webRtcConfigured && config.webSocketConfigured) {
+    appendVisionLog('WebRTC Endpoint 未配置，已自动切换到 WebSocket 实时流。');
+    elements.realtimeMode.value = 'websocket';
+    return 'websocket';
   }
   return requested;
 }
@@ -472,8 +471,11 @@ function resolveRealtimeMode(config) {
 function ensureRealtimeCanStart(mode, config) {
   const hasClientKey = Boolean(getClientApiKey());
   const hasServerKey = Boolean(config.serverApiKeyConfigured || config.webSocketConfigured);
-  if ((mode === 'webrtc' || mode === 'websocket') && !hasClientKey && !hasServerKey) {
+  if (mode === 'webrtc' && !hasClientKey && !hasServerKey) {
     throw new Error('请先在“百炼 DashScope Key”输入框填写并保存临时 Key，再开始实时慧眼。当前服务端没有保存百炼 Key。');
+  }
+  if (mode === 'websocket' && !hasClientKey && !hasServerKey) {
+    throw new Error('WebSocket 备用测试需要先在“百炼 DashScope Key”输入框填写并保存临时 Key。当前服务端没有保存百炼 Key。');
   }
 }
 
@@ -484,6 +486,17 @@ function parseErrorText(text) {
   } catch {
     return text;
   }
+}
+
+function formatRealtimeStartError(message) {
+  if (String(message || '').includes('Endpoint.AccessDenied')) {
+    return [
+      '百炼拒绝了当前 WebRTC Endpoint。',
+      '这通常不是手机或摄像头问题，而是 DashScope Key 和 WebRTC Endpoint 不属于同一个百炼业务空间，或该 Key 没有这个 Workspace Endpoint 的权限。',
+      '临时测试请把“实时接入方式”改成 WebSocket 实时流；要修 WebRTC，需要在百炼控制台确认 Key、Workspace ID、Endpoint 三者属于同一个业务空间。'
+    ].join('');
+  }
+  return message;
 }
 
 function attachRealtimeDataChannel(channel) {
