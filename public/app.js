@@ -22,7 +22,8 @@ const appState = {
   latestAssistantText: '',
   realtimeDebugLog: [],
   cameraInfo: null,
-  videoFrameCount: 0
+  videoFrameCount: 0,
+  assistantMicMuteTimer: null
 };
 
 const elements = {
@@ -634,6 +635,10 @@ function stopRealtime() {
   if (realtime?.canvasTrack?._drawTimer) {
     clearInterval(realtime.canvasTrack._drawTimer);
   }
+  if (appState.assistantMicMuteTimer) {
+    clearTimeout(appState.assistantMicMuteTimer);
+    appState.assistantMicMuteTimer = null;
+  }
   if (realtime?.audioProcessor) {
     realtime.audioProcessor.disconnect();
   }
@@ -670,6 +675,37 @@ function stopRealtime() {
   elements.camera.srcObject = null;
 }
 
+function setLocalMicrophoneEnabled(enabled, reason = '') {
+  if (!appState.stream) {
+    return;
+  }
+  for (const track of appState.stream.getAudioTracks()) {
+    track.enabled = enabled;
+  }
+  recordRealtimeDebug(enabled ? 'mic.enabled' : 'mic.disabled', reason);
+}
+
+function muteMicrophoneWhileAssistantSpeaks(reason) {
+  if (appState.assistantMicMuteTimer) {
+    clearTimeout(appState.assistantMicMuteTimer);
+  }
+  setLocalMicrophoneEnabled(false, reason);
+  appState.assistantMicMuteTimer = setTimeout(() => {
+    setLocalMicrophoneEnabled(true, 'assistant safety timeout');
+    appState.assistantMicMuteTimer = null;
+  }, 12000);
+}
+
+function releaseMicrophoneAfterAssistant(delayMs = 900) {
+  if (appState.assistantMicMuteTimer) {
+    clearTimeout(appState.assistantMicMuteTimer);
+  }
+  appState.assistantMicMuteTimer = setTimeout(() => {
+    setLocalMicrophoneEnabled(true, 'assistant response ended');
+    appState.assistantMicMuteTimer = null;
+  }, delayMs);
+}
+
 function sendRealtimeContext(options = {}) {
   const realtime = appState.realtime;
   if (!realtime || !realtime.isReady) {
@@ -687,9 +723,9 @@ function sendRealtimeContext(options = {}) {
       input_audio_format: 'pcm',
       output_audio_format: 'pcm',
       turn_detection: {
-        type: 'server_vad',
+        type: 'semantic_vad',
         threshold: 0.5,
-        silence_duration_ms: 500,
+        silence_duration_ms: 800,
         create_response: true
       },
       instructions: buildRealtimeInstructions()
@@ -734,14 +770,16 @@ async function handleRealtimeServerEvent(message) {
   }
 
   if (message.type === 'response.audio.delta' && message.delta && appState.realtime?.player) {
+    muteMicrophoneWhileAssistantSpeaks('assistant audio delta');
     appState.realtime.player.enqueue(message.delta);
     return;
   }
 
   if (message.type === 'response.audio_transcript.delta' || message.type === 'response.text.delta') {
+    muteMicrophoneWhileAssistantSpeaks(message.type);
     appState.latestAssistantText += message.delta || '';
     appState.lastVisionText = appState.latestAssistantText;
-    updateVisionOutput(`模型：${appState.latestAssistantText}`);
+    recordRealtimeDebug('assistant.partial_text', appState.latestAssistantText);
     return;
   }
 
@@ -752,6 +790,12 @@ async function handleRealtimeServerEvent(message) {
       updateVisionOutput(`模型：${text}`);
     }
     appState.latestAssistantText = '';
+    releaseMicrophoneAfterAssistant();
+    return;
+  }
+
+  if (message.type === 'response.done' || message.type === 'response.audio.done') {
+    releaseMicrophoneAfterAssistant();
     return;
   }
 
