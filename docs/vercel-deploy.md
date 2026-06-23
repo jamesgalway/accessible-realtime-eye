@@ -33,6 +33,7 @@
 - 当前本机 Vercel CLI 无法完成登录，错误发生在 CLI 访问 Vercel OpenID 配置时；浏览器访问 Vercel 正常。
 - 第一次部署后出现 500，原因是 Vercel 把根目录 `server.js` 当作 Node 函数入口，而它默认导出的是对象。已改为默认导出 HTTP handler，同时保留附加属性给 API 文件使用。
 - 当前服务端没有配置 `AMAP_KEY`、`BAILIAN_API_KEY`、`DASHSCOPE_API_KEY`。测试实时百炼时先在手机页面临时填写 DashScope Key；高德路线功能需要后续补 `AMAP_KEY`。
+- 2026-06-23 修复“开始慧眼后报错关闭”：线上默认改为 WebRTC 通话，不再默认走 WebSocket；如果服务端没有百炼 Key 且手机页面没有临时 Key，会在调用摄像头前直接提示先填写 Key，避免打开后立即关闭。
 
 ## 主动回复功能设计
 
