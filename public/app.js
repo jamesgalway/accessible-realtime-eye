@@ -59,8 +59,13 @@ async function checkHealth() {
     const data = await apiGet('/api/health');
     appState.realtimeConfig = {
       model: data.realtimeModel,
-      voice: data.realtimeVoice
+      voice: data.realtimeVoice,
+      webSocketConfigured: data.realtimeWebSocketConfigured,
+      webRtcConfigured: data.realtimeWebRtcConfigured,
+      serverApiKeyConfigured: data.bailianConfigured,
+      clientApiKeySupported: data.clientApiKeySupported
     };
+    selectRecommendedRealtimeMode(appState.realtimeConfig);
     const parts = [
       '后端已启动。',
       data.amapConfigured ? '高德 Key 已配置。' : '高德 Key 未配置，暂时不能真实规划路线。',
@@ -274,10 +279,13 @@ async function startRealtime() {
     return;
   }
 
-  const mode = elements.realtimeMode.value;
-  appendVisionLog(`正在启动${mode === 'webrtc' ? 'WebRTC 通话' : 'WebSocket 实时流'}，请允许摄像头和麦克风。`);
-
   try {
+    const config = await getRealtimeConfig();
+    selectRecommendedRealtimeMode(config);
+    const mode = resolveRealtimeMode(config);
+    ensureRealtimeCanStart(mode, config);
+    appendVisionLog(`正在启动${mode === 'webrtc' ? 'WebRTC 通话' : 'WebSocket 实时流'}，请允许摄像头和麦克风。`);
+
     appState.stream = await navigator.mediaDevices.getUserMedia({
       video: {
         facingMode: { ideal: 'environment' },
@@ -373,8 +381,7 @@ async function activateWebSocketStreams() {
 }
 
 async function startWebRtcRealtime() {
-  const config = await apiGet('/api/realtime/config');
-  appState.realtimeConfig = config;
+  const config = await getRealtimeConfig();
   if (!config.webRtcConfigured) {
     throw new Error('WebRTC Endpoint 未配置。百炼 WebRTC 需要官方白名单 Endpoint，请先用 WebSocket 实时流测试。');
   }
@@ -432,9 +439,51 @@ async function startWebRtcRealtime() {
   });
   const answerSdp = await response.text();
   if (!response.ok) {
-    throw new Error(answerSdp || `HTTP ${response.status}`);
+    throw new Error(parseErrorText(answerSdp) || `HTTP ${response.status}`);
   }
   await peer.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+}
+
+async function getRealtimeConfig() {
+  const config = await apiGet('/api/realtime/config');
+  appState.realtimeConfig = config;
+  return config;
+}
+
+function selectRecommendedRealtimeMode(config) {
+  if (!elements.realtimeMode || !config) {
+    return;
+  }
+  if (config.webRtcConfigured) {
+    elements.realtimeMode.value = 'webrtc';
+  }
+}
+
+function resolveRealtimeMode(config) {
+  const requested = elements.realtimeMode.value;
+  if (requested === 'websocket' && !config.webSocketConfigured && config.webRtcConfigured) {
+    appendVisionLog('线上部署优先使用 WebRTC 通话，已自动从 WebSocket 切换到 WebRTC。');
+    elements.realtimeMode.value = 'webrtc';
+    return 'webrtc';
+  }
+  return requested;
+}
+
+function ensureRealtimeCanStart(mode, config) {
+  const hasClientKey = Boolean(getClientApiKey());
+  const hasServerKey = Boolean(config.serverApiKeyConfigured || config.webSocketConfigured);
+  if ((mode === 'webrtc' || mode === 'websocket') && !hasClientKey && !hasServerKey) {
+    throw new Error('请先在“百炼 DashScope Key”输入框填写并保存临时 Key，再开始实时慧眼。当前服务端没有保存百炼 Key。');
+  }
+}
+
+function parseErrorText(text) {
+  try {
+    const data = JSON.parse(text);
+    return data.error || data.message || text;
+  } catch {
+    return text;
+  }
 }
 
 function attachRealtimeDataChannel(channel) {

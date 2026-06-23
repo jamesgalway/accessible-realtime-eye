@@ -161,6 +161,7 @@ async function handleApi(req, res, requestUrl) {
       ok: true,
       webSocketConfigured: Boolean(BAILIAN_API_KEY),
       webRtcConfigured: Boolean(BAILIAN_WEBRTC_ENDPOINT),
+      serverApiKeyConfigured: Boolean(BAILIAN_API_KEY),
       clientApiKeySupported: true,
       model: BAILIAN_REALTIME_MODEL,
       region: BAILIAN_REALTIME_REGION,
