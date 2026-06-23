@@ -128,14 +128,13 @@ if (require.main === module) {
   startServer();
 }
 
-module.exports = {
-  createHttpServer,
-  createRealtimeProxy,
-  handleApiRequest,
-  handleHttpRequest,
-  handleWebSocketUpgrade,
-  startServer
-};
+module.exports = handleHttpRequest;
+module.exports.createHttpServer = createHttpServer;
+module.exports.createRealtimeProxy = createRealtimeProxy;
+module.exports.handleApiRequest = handleApiRequest;
+module.exports.handleHttpRequest = handleHttpRequest;
+module.exports.handleWebSocketUpgrade = handleWebSocketUpgrade;
+module.exports.startServer = startServer;
 
 async function handleApi(req, res, requestUrl) {
   if (req.method === 'GET' && requestUrl.pathname === '/api/health') {
