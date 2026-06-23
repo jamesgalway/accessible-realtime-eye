@@ -5,6 +5,18 @@ const AUDIO_OUTPUT_RATE = 24000;
 const AUDIO_SEND_BYTES = 3200;
 const VIDEO_FRAME_INTERVAL_MS = 3000;
 const VIDEO_TRACK_DRAW_INTERVAL_MS = 1000;
+const DEFAULT_VAD_PROFILE = {
+  type: 'semantic_vad',
+  threshold: 0.65,
+  silence_duration_ms: 900,
+  create_response: true
+};
+const ASSISTANT_PLAYBACK_VAD_PROFILE = {
+  type: 'semantic_vad',
+  threshold: 0.92,
+  silence_duration_ms: 1300,
+  create_response: true
+};
 const CLIENT_API_KEY_STORAGE = 'accessibleNav.dashscopeKey';
 const CLIENT_WEBRTC_ENDPOINT_STORAGE = 'accessibleNav.webrtcEndpoint';
 
@@ -23,7 +35,8 @@ const appState = {
   realtimeDebugLog: [],
   cameraInfo: null,
   videoFrameCount: 0,
-  assistantMicMuteTimer: null
+  assistantMicMuteTimer: null,
+  assistantVadRestoreTimer: null
 };
 
 const elements = {
@@ -285,9 +298,9 @@ function loadManualRoute() {
 async function getRealtimeMediaStream() {
   const audio = {
     channelCount: 1,
-    echoCancellation: true,
-    noiseSuppression: true,
-    autoGainControl: true
+    echoCancellation: { ideal: true },
+    noiseSuppression: { ideal: true },
+    autoGainControl: { ideal: true }
   };
   const videoBase = {
     width: { ideal: 1280 },
@@ -339,6 +352,7 @@ function reportCameraSettings(stream) {
   const videoTrack = stream.getVideoTracks()[0];
   const audioTrack = stream.getAudioTracks()[0];
   const settings = videoTrack?.getSettings?.() || {};
+  const audioSettings = audioTrack?.getSettings?.() || {};
   const facingMode = settings.facingMode || 'unknown';
   const facingText = facingMode === 'environment'
     ? '后置摄像头'
@@ -349,13 +363,25 @@ function reportCameraSettings(stream) {
   const height = settings.height || elements.camera.videoHeight || '未知';
   const frameRate = settings.frameRate || '未知';
   const label = videoTrack?.label || '浏览器未提供名称';
-  const audioState = audioTrack ? '麦克风已拿到' : '没有拿到麦克风';
-  appState.cameraInfo = { facingMode, facingText, width, height, frameRate, label, audioState };
+  const audioState = audioTrack
+    ? `麦克风已拿到，回声消除=${formatBooleanSetting(audioSettings.echoCancellation)}，降噪=${formatBooleanSetting(audioSettings.noiseSuppression)}，自动增益=${formatBooleanSetting(audioSettings.autoGainControl)}`
+    : '没有拿到麦克风';
+  appState.cameraInfo = { facingMode, facingText, width, height, frameRate, label, audioState, audioSettings };
   appendVisionLog(`摄像头自检：当前是${facingText}，分辨率 ${width}x${height}，帧率 ${frameRate}，设备名：${label}；${audioState}。`);
   if (facingMode !== 'environment') {
     appendVisionLog('提醒：当前没有确认拿到后置摄像头，现场描述可能和你面前环境不一致。');
   }
   recordRealtimeDebug('media.settings', appState.cameraInfo);
+}
+
+function formatBooleanSetting(value) {
+  if (value === true) {
+    return '开';
+  }
+  if (value === false) {
+    return '关';
+  }
+  return '未知';
 }
 
 async function startRealtime() {
@@ -640,6 +666,10 @@ function stopRealtime() {
     clearTimeout(appState.assistantMicMuteTimer);
     appState.assistantMicMuteTimer = null;
   }
+  if (appState.assistantVadRestoreTimer) {
+    clearTimeout(appState.assistantVadRestoreTimer);
+    appState.assistantVadRestoreTimer = null;
+  }
   if (realtime?.audioProcessor) {
     realtime.audioProcessor.disconnect();
   }
@@ -687,6 +717,7 @@ function setLocalMicrophoneEnabled(enabled, reason = '') {
 }
 
 function muteMicrophoneWhileAssistantSpeaks(reason) {
+  enterAssistantPlaybackVadGuard(reason);
   if (!elements.strongEchoGuard?.checked) {
     recordRealtimeDebug('mic.kept_enabled', `${reason}; strong echo guard off`);
     return;
@@ -705,9 +736,34 @@ function releaseMicrophoneAfterAssistant(delayMs = 900) {
   if (appState.assistantMicMuteTimer) {
     clearTimeout(appState.assistantMicMuteTimer);
   }
+  restoreVadAfterAssistant(delayMs + 500);
   appState.assistantMicMuteTimer = setTimeout(() => {
     setLocalMicrophoneEnabled(true, 'assistant response ended');
     appState.assistantMicMuteTimer = null;
+  }, delayMs);
+}
+
+function enterAssistantPlaybackVadGuard(reason) {
+  if (appState.assistantVadRestoreTimer) {
+    clearTimeout(appState.assistantVadRestoreTimer);
+    appState.assistantVadRestoreTimer = null;
+  }
+  updateRealtimeSession({
+    vadProfile: ASSISTANT_PLAYBACK_VAD_PROFILE,
+    reason: `assistant playback: ${reason}`
+  });
+}
+
+function restoreVadAfterAssistant(delayMs = 1400) {
+  if (appState.assistantVadRestoreTimer) {
+    clearTimeout(appState.assistantVadRestoreTimer);
+  }
+  appState.assistantVadRestoreTimer = setTimeout(() => {
+    updateRealtimeSession({
+      vadProfile: DEFAULT_VAD_PROFILE,
+      reason: 'assistant tail ended'
+    });
+    appState.assistantVadRestoreTimer = null;
   }, delayMs);
 }
 
@@ -720,6 +776,29 @@ function sendRealtimeContext(options = {}) {
     return;
   }
 
+  updateRealtimeSession({
+    vadProfile: DEFAULT_VAD_PROFILE,
+    reason: options.reason || 'context update'
+  });
+
+  if (!options.quiet) {
+    appendVisionLog('已把当前导航上下文发送给实时模型。你现在可以直接问：我是不是到门口了，站牌是不是这个，入口在哪边。');
+  }
+}
+
+function updateRealtimeSession(options = {}) {
+  const realtime = appState.realtime;
+  if (!realtime || !realtime.isReady) {
+    return;
+  }
+
+  const vadProfile = options.vadProfile || DEFAULT_VAD_PROFILE;
+  const profileKey = `${vadProfile.type}:${vadProfile.threshold}:${vadProfile.silence_duration_ms}`;
+  if (realtime.vadProfileKey === profileKey && options.reason !== 'context update') {
+    return;
+  }
+  realtime.vadProfileKey = profileKey;
+
   const event = {
     type: 'session.update',
       session: {
@@ -727,12 +806,7 @@ function sendRealtimeContext(options = {}) {
       voice: appState.realtime?.voice || appState.realtimeConfig?.voice || 'Tina',
       input_audio_format: 'pcm',
       output_audio_format: 'pcm',
-      turn_detection: {
-        type: 'semantic_vad',
-        threshold: 0.5,
-        silence_duration_ms: 800,
-        create_response: true
-      },
+      turn_detection: vadProfile,
       instructions: buildRealtimeInstructions()
     }
   };
@@ -740,13 +814,10 @@ function sendRealtimeContext(options = {}) {
   recordRealtimeDebug('client.session.update', {
     modalities: event.session.modalities,
     voice: event.session.voice,
-    turnDetection: event.session.turn_detection?.type || 'none',
+    turnDetection: event.session.turn_detection,
+    reason: options.reason || '',
     target: elements.visionQuestion.value
   });
-
-  if (!options.quiet) {
-    appendVisionLog('已把当前导航上下文发送给实时模型。你现在可以直接问：我是不是到门口了，站牌是不是这个，入口在哪边。');
-  }
 }
 
 async function handleRealtimeServerEvent(message) {
