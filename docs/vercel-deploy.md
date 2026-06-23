@@ -10,7 +10,7 @@
 - Vercel 项目：`accessible-realtime-eye`
 - 正式访问域名：`https://accessible-realtime-eye.vercel.app/`
 - 当前已验证：正式首页返回 200，`/api/health` 返回 `ok: true`
-- 最新已提交代码：`4303893`
+- 最新代码以 GitHub `main` 分支为准；本轮后台化前端提交是 `f643746`。
 - 已加入 Vercel 入口：`vercel.json`
 - 已加入 API Functions：`api/`
 - 本地普通 HTTP 服务仍可用：`node server.js`
@@ -24,6 +24,7 @@
 - 正确 WebRTC Endpoint：`llm-ws-ye3smbxl6p0m9pxi.cn-beijing.maas.aliyuncs.com`。
 - Vercel 环境变量已有 `BAILIAN_WEBRTC_ENDPOINT`，并已重新部署。
 - 线上 `/api/realtime/config` 已验证：`serverApiKeyConfigured: true`，`webRtcConfigured: true`。
+- 线上正式页面已验证：默认展示“百炼后台已配置 Key 和 WebRTC Endpoint”，并包含“高级调试”折叠区。
 - 手机端默认不需要填写 Key 或 Endpoint；页面里的临时 Key 区域只保留在“高级调试”折叠区。
 - 前端默认不再把手机本机旧 Key 或旧 Endpoint 发给后端，避免旧值覆盖 Vercel 后台正确配置。
 
