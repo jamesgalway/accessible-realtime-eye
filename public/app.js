@@ -4,6 +4,7 @@ const AUDIO_INPUT_RATE = 16000;
 const AUDIO_OUTPUT_RATE = 24000;
 const AUDIO_SEND_BYTES = 3200;
 const VIDEO_FRAME_INTERVAL_MS = 3000;
+const VIDEO_TRACK_DRAW_INTERVAL_MS = 1000;
 const CLIENT_API_KEY_STORAGE = 'accessibleNav.dashscopeKey';
 const CLIENT_WEBRTC_ENDPOINT_STORAGE = 'accessibleNav.webrtcEndpoint';
 
@@ -18,7 +19,10 @@ const appState = {
   pendingAudio: [],
   pendingAudioBytes: 0,
   sentFirstAudio: false,
-  latestAssistantText: ''
+  latestAssistantText: '',
+  realtimeDebugLog: [],
+  cameraInfo: null,
+  videoFrameCount: 0
 };
 
 const elements = {
@@ -39,7 +43,8 @@ const elements = {
   advancedRealtimeConfig: document.querySelector('#advanced-realtime-config'),
   clientApiKey: document.querySelector('#client-api-key'),
   clientWebRtcEndpoint: document.querySelector('#client-webrtc-endpoint'),
-  visionQuestion: document.querySelector('#vision-question')
+  visionQuestion: document.querySelector('#vision-question'),
+  copyRealtimeLog: document.querySelector('#copy-realtime-log')
 };
 
 document.querySelector('#use-location').addEventListener('click', useCurrentLocation);
@@ -54,6 +59,7 @@ document.querySelector('#stop-realtime').addEventListener('click', stopRealtime)
 document.querySelector('#speak-vision').addEventListener('click', () => speak(appState.lastVisionText || elements.visionOutput.textContent));
 document.querySelector('#save-client-key').addEventListener('click', saveClientApiKey);
 document.querySelector('#clear-client-key').addEventListener('click', clearClientApiKey);
+document.querySelector('#copy-realtime-log').addEventListener('click', copyRealtimeDebugLog);
 
 initializeClientApiKey();
 checkHealth();
@@ -274,6 +280,82 @@ function loadManualRoute() {
   sendRealtimeContext({ quiet: true });
 }
 
+async function getRealtimeMediaStream() {
+  const audio = {
+    channelCount: 1,
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true
+  };
+  const videoBase = {
+    width: { ideal: 1280 },
+    height: { ideal: 720 }
+  };
+  const attempts = [
+    {
+      label: '强制后置摄像头',
+      constraints: {
+        video: { ...videoBase, facingMode: { exact: 'environment' } },
+        audio
+      }
+    },
+    {
+      label: '优先后置摄像头',
+      constraints: {
+        video: { ...videoBase, facingMode: { ideal: 'environment' } },
+        audio
+      }
+    },
+    {
+      label: '系统默认摄像头',
+      constraints: {
+        video: videoBase,
+        audio
+      }
+    }
+  ];
+
+  let lastError = null;
+  for (const attempt of attempts) {
+    try {
+      recordRealtimeDebug('media.request', attempt.label);
+      const stream = await navigator.mediaDevices.getUserMedia(attempt.constraints);
+      recordRealtimeDebug('media.success', attempt.label);
+      if (attempt.label !== '强制后置摄像头') {
+        appendVisionLog(`强制后置摄像头不可用，已降级为：${attempt.label}。需要看下面的摄像头自检结果。`);
+      }
+      return stream;
+    } catch (error) {
+      lastError = error;
+      recordRealtimeDebug('media.failed', `${attempt.label}：${error.name || 'Error'} ${error.message || ''}`.trim());
+    }
+  }
+  throw lastError || new Error('摄像头和麦克风打开失败。');
+}
+
+function reportCameraSettings(stream) {
+  const videoTrack = stream.getVideoTracks()[0];
+  const audioTrack = stream.getAudioTracks()[0];
+  const settings = videoTrack?.getSettings?.() || {};
+  const facingMode = settings.facingMode || 'unknown';
+  const facingText = facingMode === 'environment'
+    ? '后置摄像头'
+    : facingMode === 'user'
+      ? '前置摄像头'
+      : '未知摄像头';
+  const width = settings.width || elements.camera.videoWidth || '未知';
+  const height = settings.height || elements.camera.videoHeight || '未知';
+  const frameRate = settings.frameRate || '未知';
+  const label = videoTrack?.label || '浏览器未提供名称';
+  const audioState = audioTrack ? '麦克风已拿到' : '没有拿到麦克风';
+  appState.cameraInfo = { facingMode, facingText, width, height, frameRate, label, audioState };
+  appendVisionLog(`摄像头自检：当前是${facingText}，分辨率 ${width}x${height}，帧率 ${frameRate}，设备名：${label}；${audioState}。`);
+  if (facingMode !== 'environment') {
+    appendVisionLog('提醒：当前没有确认拿到后置摄像头，现场描述可能和你面前环境不一致。');
+  }
+  recordRealtimeDebug('media.settings', appState.cameraInfo);
+}
+
 async function startRealtime() {
   if (appState.realtime) {
     appendVisionLog('实时慧眼已经在运行。');
@@ -286,26 +368,16 @@ async function startRealtime() {
   }
 
   try {
+    resetRealtimeDebugLog();
     const config = await getRealtimeConfig();
     const mode = resolveRealtimeMode(config);
     ensureRealtimeCanStart(mode, config);
     appendVisionLog(`正在启动${mode === 'webrtc' ? 'WebRTC 通话' : 'WebSocket 实时流'}，请允许摄像头和麦克风。`);
 
-    appState.stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: { ideal: 'environment' },
-        width: { ideal: 1280 },
-        height: { ideal: 720 }
-      },
-      audio: {
-        channelCount: 1,
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true
-      }
-    });
+    appState.stream = await getRealtimeMediaStream();
     elements.camera.srcObject = appState.stream;
     await elements.camera.play();
+    reportCameraSettings(appState.stream);
 
     if (mode === 'webrtc') {
       await startWebRtcRealtime();
@@ -398,6 +470,11 @@ async function startWebRtcRealtime() {
   const canvasTrack = createLowFpsVideoTrack(localVideoTrack);
   peer.addTrack(audioTrack, appState.stream);
   peer.addTrack(canvasTrack, new MediaStream([canvasTrack]));
+  recordRealtimeDebug('webrtc.tracks.added', {
+    audio: Boolean(audioTrack),
+    sourceVideo: localVideoTrack?.getSettings?.() || {},
+    sentVideo: canvasTrack?.getSettings?.() || {}
+  });
 
   peer.ontrack = (event) => {
     elements.remoteAudio.srcObject = event.streams[0];
@@ -410,22 +487,29 @@ async function startWebRtcRealtime() {
   outboundChannel.onopen = () => {
     appState.realtime.eventChannel = outboundChannel;
     appState.realtime.isReady = true;
+    recordRealtimeDebug('datachannel.open', outboundChannel.label || 'outbound');
     sendRealtimeContext({ quiet: true });
     appendVisionLog('WebRTC 通话已接通。你可以直接说话。');
   };
 
   outboundChannel.onmessage = (event) => {
-    const message = JSON.parse(event.data);
-    handleRealtimeServerEvent(message);
+    handleRealtimeDataChannelMessage(event.data);
   };
-  outboundChannel.onerror = () => appendVisionLog('WebRTC 事件通道出错。');
-  outboundChannel.onclose = () => appendVisionLog('WebRTC 事件通道已关闭。');
+  outboundChannel.onerror = () => {
+    recordRealtimeDebug('datachannel.error', outboundChannel.label || 'outbound');
+    appendVisionLog('WebRTC 事件通道出错。');
+  };
+  outboundChannel.onclose = () => {
+    recordRealtimeDebug('datachannel.close', outboundChannel.label || 'outbound');
+    appendVisionLog('WebRTC 事件通道已关闭。');
+  };
 
   appState.realtime = {
     mode: 'webrtc',
     peer,
     eventChannel: outboundChannel,
     canvasTrack,
+    statsTimer: null,
     voice: config.voice,
     isReady: false
   };
@@ -433,6 +517,7 @@ async function startWebRtcRealtime() {
   const offer = await peer.createOffer();
   await peer.setLocalDescription(offer);
   await waitForIceGatheringComplete(peer);
+  recordRealtimeDebug('webrtc.offer.ready', summarizeSdp(peer.localDescription.sdp));
 
   const response = await fetch('/api/realtime/sdp', {
     method: 'POST',
@@ -444,6 +529,8 @@ async function startWebRtcRealtime() {
     throw new Error(parseErrorText(answerSdp) || `HTTP ${response.status}`);
   }
   await peer.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+  recordRealtimeDebug('webrtc.answer.ready', summarizeSdp(answerSdp));
+  startVideoStatsPolling(peer);
 }
 
 async function getRealtimeConfig() {
@@ -505,6 +592,7 @@ function formatRealtimeStartError(message) {
 
 function attachRealtimeDataChannel(channel) {
   channel.onopen = () => {
+    recordRealtimeDebug('datachannel.open', channel.label || 'inbound');
     if (appState.realtime?.mode === 'webrtc' && !appState.realtime.eventChannel) {
       appState.realtime.eventChannel = channel;
       appState.realtime.isReady = true;
@@ -512,11 +600,26 @@ function attachRealtimeDataChannel(channel) {
     }
   };
   channel.onmessage = (event) => {
-    const message = JSON.parse(event.data);
-    handleRealtimeServerEvent(message);
+    handleRealtimeDataChannelMessage(event.data);
   };
-  channel.onerror = () => appendVisionLog(`WebRTC 数据通道出错：${channel.label || '未命名通道'}`);
-  channel.onclose = () => appendVisionLog(`WebRTC 数据通道已关闭：${channel.label || '未命名通道'}`);
+  channel.onerror = () => {
+    recordRealtimeDebug('datachannel.error', channel.label || 'inbound');
+    appendVisionLog(`WebRTC 数据通道出错：${channel.label || '未命名通道'}`);
+  };
+  channel.onclose = () => {
+    recordRealtimeDebug('datachannel.close', channel.label || 'inbound');
+    appendVisionLog(`WebRTC 数据通道已关闭：${channel.label || '未命名通道'}`);
+  };
+}
+
+function handleRealtimeDataChannelMessage(data) {
+  try {
+    const message = JSON.parse(data);
+    handleRealtimeServerEvent(message);
+  } catch (error) {
+    recordRealtimeDebug('datachannel.parse_failed', String(data || '').slice(0, 500));
+    appendVisionLog(`WebRTC 返回了无法解析的事件：${error.message}`);
+  }
 }
 
 function stopRealtime() {
@@ -524,6 +627,12 @@ function stopRealtime() {
 
   if (realtime?.videoTimer) {
     clearInterval(realtime.videoTimer);
+  }
+  if (realtime?.statsTimer) {
+    clearInterval(realtime.statsTimer);
+  }
+  if (realtime?.canvasTrack?._drawTimer) {
+    clearInterval(realtime.canvasTrack._drawTimer);
   }
   if (realtime?.audioProcessor) {
     realtime.audioProcessor.disconnect();
@@ -557,6 +666,7 @@ function stopRealtime() {
   appState.pendingAudio = [];
   appState.pendingAudioBytes = 0;
   appState.sentFirstAudio = false;
+  appState.videoFrameCount = 0;
   elements.camera.srcObject = null;
 }
 
@@ -586,6 +696,12 @@ function sendRealtimeContext(options = {}) {
     }
   };
   sendRealtimeEvent(event);
+  recordRealtimeDebug('client.session.update', {
+    modalities: event.session.modalities,
+    voice: event.session.voice,
+    turnDetection: event.session.turn_detection?.type || 'none',
+    target: elements.visionQuestion.value
+  });
 
   if (!options.quiet) {
     appendVisionLog('已把当前导航上下文发送给实时模型。你现在可以直接问：我是不是到门口了，站牌是不是这个，入口在哪边。');
@@ -593,6 +709,7 @@ function sendRealtimeContext(options = {}) {
 }
 
 async function handleRealtimeServerEvent(message) {
+  recordRealtimeDebug('server.event', summarizeRealtimeEvent(message));
   if (message.type === 'proxy.need_key') {
     appendVisionLog(message.message || '请先填写并保存百炼 Key，然后重新开始实时慧眼。');
     return;
@@ -718,6 +835,49 @@ function sendVideoFrame() {
   });
 }
 
+function startVideoStatsPolling(peer) {
+  const realtime = appState.realtime;
+  if (!realtime || realtime.mode !== 'webrtc') {
+    return;
+  }
+
+  realtime.statsTimer = setInterval(async () => {
+    try {
+      const stats = await peer.getStats();
+      let outboundVideo = null;
+      stats.forEach((report) => {
+        if (report.type === 'outbound-rtp' && report.kind === 'video') {
+          outboundVideo = report;
+        }
+      });
+      if (!outboundVideo) {
+        recordRealtimeDebug('webrtc.video_stats.missing', '没有找到 outbound-rtp video 统计。');
+        return;
+      }
+
+      const summary = {
+        browserDrawnFrames: appState.videoFrameCount,
+        framesSent: outboundVideo.framesSent ?? null,
+        bytesSent: outboundVideo.bytesSent ?? null,
+        packetsSent: outboundVideo.packetsSent ?? null,
+        timestamp: outboundVideo.timestamp
+      };
+      recordRealtimeDebug('webrtc.video_stats', summary);
+
+      const previous = realtime.lastVideoStats;
+      realtime.lastVideoStats = summary;
+      const framesIncreased = previous && summary.framesSent !== null && summary.framesSent > (previous.framesSent || 0);
+      const bytesIncreased = previous && summary.bytesSent !== null && summary.bytesSent > (previous.bytesSent || 0);
+      if (!realtime.videoStatsAnnounced && (framesIncreased || bytesIncreased)) {
+        realtime.videoStatsAnnounced = true;
+        appendVisionLog(`视频发送自检：浏览器已绘制 ${summary.browserDrawnFrames} 帧，WebRTC 已发出 ${summary.framesSent ?? '未知'} 帧，${summary.bytesSent ?? '未知'} 字节。说明本机正在向百炼方向发送视频轨道。`);
+      }
+    } catch (error) {
+      recordRealtimeDebug('webrtc.video_stats.failed', error.message);
+    }
+  }, 3000);
+}
+
 function createLowFpsVideoTrack(sourceTrack) {
   const sourceStream = new MediaStream([sourceTrack]);
   const video = document.createElement('video');
@@ -730,7 +890,7 @@ function createLowFpsVideoTrack(sourceTrack) {
   canvas.width = 640;
   canvas.height = 360;
   const context = canvas.getContext('2d');
-  setInterval(() => {
+  const drawTimer = setInterval(() => {
     if (video.readyState >= 2) {
       const scale = Math.min(canvas.width / video.videoWidth, canvas.height / video.videoHeight);
       const width = Math.round(video.videoWidth * scale);
@@ -740,10 +900,13 @@ function createLowFpsVideoTrack(sourceTrack) {
       context.fillStyle = '#111827';
       context.fillRect(0, 0, canvas.width, canvas.height);
       context.drawImage(video, x, y, width, height);
+      appState.videoFrameCount += 1;
     }
-  }, VIDEO_FRAME_INTERVAL_MS);
+  }, VIDEO_TRACK_DRAW_INTERVAL_MS);
 
-  return canvas.captureStream(1).getVideoTracks()[0];
+  const track = canvas.captureStream(1).getVideoTracks()[0];
+  track._drawTimer = drawTimer;
+  return track;
 }
 
 function buildRealtimeInstructions() {
@@ -752,6 +915,8 @@ function buildRealtimeInstructions() {
     '你是给视障者张振宇使用的实时视频通话式导航助手。',
     '你正在接收手机摄像头画面、麦克风语音和导航状态。',
     '必须像真人视频协助一样回答，但只能依据地图状态和画面中确实能看到或听到的信息。',
+    '必须明确区分“画面里确实看见”和“根据语音或导航状态推测”。不能把推测说成看见。',
+    '如果没有收到清晰画面、画面太晃、摄像头方向不对、或只听到语音没有看到对应物体，必须直接说：我现在看不清，不能确认。',
     '不能编造门牌、站牌、入口、左右侧、过街次数。',
     '如果看不清、地图和画面冲突、或者不能确认安全过街，必须直接说不确定，并给安全的下一步，例如原地慢慢扫视、退回路边、询问工作人员。',
     '回答要短，适合语音播报。优先说行动，不要泛泛描述画面。',
@@ -772,6 +937,79 @@ function appendVisionLog(text) {
     : text;
   elements.visionOutput.textContent = next;
   elements.visionOutput.scrollTop = elements.visionOutput.scrollHeight;
+}
+
+function resetRealtimeDebugLog() {
+  appState.realtimeDebugLog = [];
+  appState.latestAssistantText = '';
+  appState.lastVisionText = '';
+  appState.videoFrameCount = 0;
+  recordRealtimeDebug('session.start', {
+    page: location.href,
+    userAgent: navigator.userAgent,
+    time: new Date().toISOString()
+  });
+}
+
+function recordRealtimeDebug(type, detail) {
+  const entry = {
+    time: new Date().toISOString(),
+    type,
+    detail
+  };
+  appState.realtimeDebugLog.push(entry);
+  if (appState.realtimeDebugLog.length > 500) {
+    appState.realtimeDebugLog.shift();
+  }
+}
+
+function summarizeRealtimeEvent(message) {
+  const summary = { type: message.type || 'unknown' };
+  if (message.event_id) {
+    summary.eventId = message.event_id;
+  }
+  if (message.type === 'response.audio_transcript.delta' || message.type === 'response.text.delta') {
+    summary.delta = message.delta || '';
+  } else if (message.type === 'response.audio_transcript.done') {
+    summary.transcript = message.transcript || '';
+  } else if (message.type === 'response.text.done') {
+    summary.text = message.text || '';
+  } else if (message.type === 'conversation.item.input_audio_transcription.completed') {
+    summary.transcript = message.transcript || '';
+  } else if (message.type === 'error') {
+    summary.error = message.error?.message || message.error || message;
+  } else if (message.type?.startsWith('response.')) {
+    summary.responseId = message.response_id || message.response?.id || '';
+  }
+  return summary;
+}
+
+function summarizeSdp(sdp) {
+  const text = String(sdp || '');
+  return {
+    hasAudio: /\nm=audio /i.test(`\n${text}`),
+    hasVideo: /\nm=video /i.test(`\n${text}`),
+    hasDataChannel: /\nm=application /i.test(`\n${text}`),
+    length: text.length
+  };
+}
+
+async function copyRealtimeDebugLog() {
+  const payload = [
+    '实时慧眼本轮日志',
+    `导出时间：${new Date().toISOString()}`,
+    `摄像头：${JSON.stringify(appState.cameraInfo || {}, null, 2)}`,
+    `页面确认结果：${elements.visionOutput.textContent || ''}`,
+    '事件日志：',
+    JSON.stringify(appState.realtimeDebugLog, null, 2)
+  ].join('\n\n');
+
+  try {
+    await navigator.clipboard.writeText(payload);
+    appendVisionLog('本轮日志已复制到剪贴板。');
+  } catch {
+    appendVisionLog('复制本轮日志失败：浏览器没有开放剪贴板权限。请长按选择“确认结果”区域里的文本，或换电脑浏览器导出。');
+  }
 }
 
 function initializeClientApiKey() {
