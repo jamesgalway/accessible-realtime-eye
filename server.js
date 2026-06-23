@@ -52,7 +52,7 @@ if (process.argv.includes('--check')) {
   process.exit(result.ok ? 0 : 1);
 }
 
-const server = http.createServer(async (req, res) => {
+async function handleHttpRequest(req, res) {
   try {
     const requestUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
@@ -68,29 +68,74 @@ const server = http.createServer(async (req, res) => {
       error: error.message || '服务器内部错误'
     });
   }
-});
+}
 
-server.listen(PORT, HOST, () => {
-  console.log(`Accessible navigation prototype is running on http://${HOST}:${PORT}`);
-});
-
-const browserRealtimeServer = new WebSocket.Server({ noServer: true, maxPayload: 900 * 1024 });
-
-server.on('upgrade', (req, socket, head) => {
-  const requestUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-  if (requestUrl.pathname !== '/api/realtime/ws') {
-    socket.destroy();
-    return;
+async function handleApiRequest(req, res) {
+  try {
+    const requestUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+    await handleApi(req, res, requestUrl);
+  } catch (error) {
+    sendJson(res, error.statusCode || 500, {
+      ok: false,
+      error: error.message || '服务器内部错误'
+    });
   }
+}
 
+function createHttpServer() {
+  const server = http.createServer(handleHttpRequest);
+  const browserRealtimeServer = createBrowserRealtimeServer();
+
+  server.on('upgrade', (req, socket, head) => {
+    const requestUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+    if (requestUrl.pathname !== '/api/realtime/ws') {
+      socket.destroy();
+      return;
+    }
+
+    browserRealtimeServer.handleUpgrade(req, socket, head, (browserSocket) => {
+      browserRealtimeServer.emit('connection', browserSocket, req);
+    });
+  });
+
+  return server;
+}
+
+function createBrowserRealtimeServer() {
+  const browserRealtimeServer = new WebSocket.Server({ noServer: true, maxPayload: 900 * 1024 });
+  browserRealtimeServer.on('connection', (browserSocket) => {
+    createRealtimeProxy(browserSocket);
+  });
+  return browserRealtimeServer;
+}
+
+function startServer() {
+  const server = createHttpServer();
+  server.listen(PORT, HOST, () => {
+    console.log(`Accessible navigation prototype is running on http://${HOST}:${PORT}`);
+  });
+  return server;
+}
+
+function handleWebSocketUpgrade(req, socket, head = Buffer.alloc(0)) {
+  const browserRealtimeServer = createBrowserRealtimeServer();
   browserRealtimeServer.handleUpgrade(req, socket, head, (browserSocket) => {
     browserRealtimeServer.emit('connection', browserSocket, req);
   });
-});
+}
 
-browserRealtimeServer.on('connection', (browserSocket) => {
-  createRealtimeProxy(browserSocket);
-});
+if (require.main === module) {
+  startServer();
+}
+
+module.exports = {
+  createHttpServer,
+  createRealtimeProxy,
+  handleApiRequest,
+  handleHttpRequest,
+  handleWebSocketUpgrade,
+  startServer
+};
 
 async function handleApi(req, res, requestUrl) {
   if (req.method === 'GET' && requestUrl.pathname === '/api/health') {

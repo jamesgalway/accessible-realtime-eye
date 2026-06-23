@@ -1,0 +1,34 @@
+{
+  "version": 2,
+  "functions": {
+    "api/**/*.js": {
+      "maxDuration": 60
+    }
+  },
+  "routes": [
+    {
+      "src": "/",
+      "dest": "/public/index.html"
+    },
+    {
+      "src": "/api/realtime/ws",
+      "dest": "/api/realtime/ws.js"
+    },
+    {
+      "src": "/api/realtime/config",
+      "dest": "/api/realtime/config.js"
+    },
+    {
+      "src": "/api/realtime/sdp",
+      "dest": "/api/realtime/sdp.js"
+    },
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/$1.js"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/public/$1"
+    }
+  ]
+}
