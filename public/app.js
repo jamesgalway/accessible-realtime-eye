@@ -5,6 +5,7 @@ const AUDIO_OUTPUT_RATE = 24000;
 const AUDIO_SEND_BYTES = 3200;
 const VIDEO_FRAME_INTERVAL_MS = 3000;
 const VIDEO_TRACK_DRAW_INTERVAL_MS = 1000;
+const SILENT_VIDEO_CHECK_MS = 10000;
 const DEFAULT_VAD_PROFILE = {
   type: 'semantic_vad',
   threshold: 0.65,
@@ -59,6 +60,7 @@ const elements = {
   clientWebRtcEndpoint: document.querySelector('#client-webrtc-endpoint'),
   visionQuestion: document.querySelector('#vision-question'),
   strongEchoGuard: document.querySelector('#strong-echo-guard'),
+  checkSilentVideo: document.querySelector('#check-silent-video'),
   copyRealtimeLog: document.querySelector('#copy-realtime-log')
 };
 
@@ -75,6 +77,7 @@ document.querySelector('#speak-vision').addEventListener('click', () => speak(ap
 document.querySelector('#save-client-key').addEventListener('click', saveClientApiKey);
 document.querySelector('#clear-client-key').addEventListener('click', clearClientApiKey);
 document.querySelector('#copy-realtime-log').addEventListener('click', copyRealtimeDebugLog);
+document.querySelector('#check-silent-video').addEventListener('click', checkSilentVideoPush);
 
 initializeClientApiKey();
 checkHealth();
@@ -955,6 +958,43 @@ function sendVideoFrame() {
   });
 }
 
+async function checkSilentVideoPush() {
+  const realtime = appState.realtime;
+  if (!realtime || realtime.mode !== 'webrtc' || !realtime.peer) {
+    appendVisionLog('静默视频推送自检失败：WebRTC 还没有接通。');
+    return;
+  }
+  if (realtime.silentVideoCheckRunning) {
+    appendVisionLog('静默视频推送自检已经在进行，请等本轮结束。');
+    return;
+  }
+
+  realtime.silentVideoCheckRunning = true;
+  try {
+    appendVisionLog('静默视频推送自检开始：请保持不说话 10 秒，我只检查视频帧和字节是否继续增长。');
+    const before = await getOutboundVideoStats(realtime.peer);
+    recordRealtimeDebug('silent_video_check.before', before);
+    await delay(SILENT_VIDEO_CHECK_MS);
+    const after = await getOutboundVideoStats(realtime.peer);
+    recordRealtimeDebug('silent_video_check.after', after);
+
+    const frameDelta = numberDelta(after.framesSent, before.framesSent);
+    const byteDelta = numberDelta(after.bytesSent, before.bytesSent);
+    const packetDelta = numberDelta(after.packetsSent, before.packetsSent);
+    const text = frameDelta > 0 || byteDelta > 0
+      ? `静默视频推送自检通过：10 秒内你没有说话也没关系，WebRTC 视频仍在发送。增加 ${frameDelta} 帧，${byteDelta} 字节，${packetDelta} 个包。`
+      : '静默视频推送自检未通过：10 秒内视频发送统计没有增长，需要继续查浏览器或 WebRTC 视频轨道。';
+    appendVisionLog(text);
+    speak(text);
+  } catch (error) {
+    const text = `静默视频推送自检失败：${error.message}`;
+    appendVisionLog(text);
+    recordRealtimeDebug('silent_video_check.failed', error.message);
+  } finally {
+    realtime.silentVideoCheckRunning = false;
+  }
+}
+
 function startVideoStatsPolling(peer) {
   const realtime = appState.realtime;
   if (!realtime || realtime.mode !== 'webrtc') {
@@ -963,25 +1003,7 @@ function startVideoStatsPolling(peer) {
 
   realtime.statsTimer = setInterval(async () => {
     try {
-      const stats = await peer.getStats();
-      let outboundVideo = null;
-      stats.forEach((report) => {
-        if (report.type === 'outbound-rtp' && report.kind === 'video') {
-          outboundVideo = report;
-        }
-      });
-      if (!outboundVideo) {
-        recordRealtimeDebug('webrtc.video_stats.missing', '没有找到 outbound-rtp video 统计。');
-        return;
-      }
-
-      const summary = {
-        browserDrawnFrames: appState.videoFrameCount,
-        framesSent: outboundVideo.framesSent ?? null,
-        bytesSent: outboundVideo.bytesSent ?? null,
-        packetsSent: outboundVideo.packetsSent ?? null,
-        timestamp: outboundVideo.timestamp
-      };
+      const summary = await getOutboundVideoStats(peer);
       recordRealtimeDebug('webrtc.video_stats', summary);
 
       const previous = realtime.lastVideoStats;
@@ -996,6 +1018,37 @@ function startVideoStatsPolling(peer) {
       recordRealtimeDebug('webrtc.video_stats.failed', error.message);
     }
   }, 3000);
+}
+
+async function getOutboundVideoStats(peer) {
+  const stats = await peer.getStats();
+  let outboundVideo = null;
+  stats.forEach((report) => {
+    if (report.type === 'outbound-rtp' && report.kind === 'video') {
+      outboundVideo = report;
+    }
+  });
+  if (!outboundVideo) {
+    throw new Error('没有找到 outbound-rtp video 统计。');
+  }
+  return {
+    browserDrawnFrames: appState.videoFrameCount,
+    framesSent: outboundVideo.framesSent ?? null,
+    bytesSent: outboundVideo.bytesSent ?? null,
+    packetsSent: outboundVideo.packetsSent ?? null,
+    timestamp: outboundVideo.timestamp
+  };
+}
+
+function numberDelta(after, before) {
+  if (typeof after !== 'number' || typeof before !== 'number') {
+    return 0;
+  }
+  return Math.max(0, after - before);
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function createLowFpsVideoTrack(sourceTrack) {
