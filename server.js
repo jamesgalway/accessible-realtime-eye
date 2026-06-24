@@ -22,6 +22,7 @@ const BAILIAN_REALTIME_REGION = process.env.BAILIAN_REALTIME_REGION === 'intl' ?
 const BAILIAN_REALTIME_VOICE = process.env.BAILIAN_REALTIME_VOICE || 'Tina';
 const BAILIAN_WEBRTC_ENDPOINT = process.env.BAILIAN_WEBRTC_ENDPOINT || '';
 const AMAP_MIN_INTERVAL_MS = Number(process.env.AMAP_MIN_INTERVAL_MS || 450);
+const DEPLOY_MARKER = 'manual-ws-20260624-1';
 
 let amapQueue;
 
@@ -45,7 +46,8 @@ if (process.argv.includes('--check')) {
     amapConfigured: Boolean(AMAP_KEY),
     bailianConfigured: Boolean(BAILIAN_API_KEY),
     realtimeWebSocketConfigured: Boolean(BAILIAN_API_KEY),
-    realtimeWebRtcConfigured: Boolean(BAILIAN_API_KEY && BAILIAN_WEBRTC_ENDPOINT)
+    realtimeWebRtcConfigured: Boolean(BAILIAN_API_KEY && BAILIAN_WEBRTC_ENDPOINT),
+    deployMarker: DEPLOY_MARKER
   };
   result.ok = result.requiredFiles.every((item) => item.exists);
   console.log(JSON.stringify(result, null, 2));
@@ -151,6 +153,7 @@ async function handleApi(req, res, requestUrl) {
       realtimeModel: BAILIAN_REALTIME_MODEL,
       realtimeRegion: BAILIAN_REALTIME_REGION,
       realtimeVoice: BAILIAN_REALTIME_VOICE,
+      deployMarker: DEPLOY_MARKER,
       clientApiKeySupported: true,
       note: '高德 Key 只在后端使用。百炼 Key 可由后端环境变量提供，也可由测试手机临时发送给代理。'
     });
@@ -167,6 +170,7 @@ async function handleApi(req, res, requestUrl) {
       model: BAILIAN_REALTIME_MODEL,
       region: BAILIAN_REALTIME_REGION,
       voice: BAILIAN_REALTIME_VOICE,
+      deployMarker: DEPLOY_MARKER,
       webSocketPath: '/api/realtime/ws',
       webRtcSdpPath: '/api/realtime/sdp'
     });
