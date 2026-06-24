@@ -3,7 +3,7 @@
 const AUDIO_INPUT_RATE = 16000;
 const AUDIO_OUTPUT_RATE = 24000;
 const AUDIO_SEND_BYTES = 3200;
-const VIDEO_FRAME_INTERVAL_MS = 3000;
+const VIDEO_FRAME_INTERVAL_MS = 1000;
 const VIDEO_TRACK_DRAW_INTERVAL_MS = 1000;
 const SILENT_VIDEO_CHECK_MS = 10000;
 const DEFAULT_VAD_PROFILE = {
@@ -61,6 +61,8 @@ const elements = {
   visionQuestion: document.querySelector('#vision-question'),
   strongEchoGuard: document.querySelector('#strong-echo-guard'),
   checkSilentVideo: document.querySelector('#check-silent-video'),
+  commitSilentContext: document.querySelector('#commit-silent-context'),
+  commitAndRespond: document.querySelector('#commit-and-respond'),
   copyRealtimeLog: document.querySelector('#copy-realtime-log')
 };
 
@@ -78,6 +80,8 @@ document.querySelector('#save-client-key').addEventListener('click', saveClientA
 document.querySelector('#clear-client-key').addEventListener('click', clearClientApiKey);
 document.querySelector('#copy-realtime-log').addEventListener('click', copyRealtimeDebugLog);
 document.querySelector('#check-silent-video').addEventListener('click', checkSilentVideoPush);
+document.querySelector('#commit-silent-context').addEventListener('click', () => commitRealtimeManualBuffer({ requestResponse: false }));
+document.querySelector('#commit-and-respond').addEventListener('click', () => commitRealtimeManualBuffer({ requestResponse: true }));
 
 initializeClientApiKey();
 checkHealth();
@@ -99,8 +103,8 @@ async function checkHealth() {
       '后端已启动。',
       data.amapConfigured ? '高德 Key 已配置。' : '高德 Key 未配置，暂时不能真实规划路线。',
       data.bailianConfigured ? '服务端百炼 Key 已配置，手机端无需填写 Key。' : '服务端百炼 Key 未配置，可展开高级调试临时填写 Key。',
-      '当前 Vercel 部署不使用 WebSocket 长连接。',
-      data.realtimeWebRtcConfigured ? 'WebRTC Endpoint 已配置，手机端无需填写 Endpoint。' : 'WebRTC Endpoint 未配置，需展开高级调试填写白名单 Endpoint。'
+      data.realtimeWebSocketConfigured ? 'WebSocket Manual 可用于静默视觉记忆测试。' : 'WebSocket Manual 需要服务端百炼 Key，或在高级调试临时填写 Key。',
+      data.realtimeWebRtcConfigured ? 'WebRTC Endpoint 已配置。' : 'WebRTC Endpoint 未配置，不影响 WebSocket Manual 测试。'
     ];
     elements.health.textContent = parts.join('');
   } catch (error) {
@@ -485,7 +489,7 @@ async function activateWebSocketStreams() {
   realtime.audioSilenceGain.connect(realtime.audioContext.destination);
 
   realtime.videoTimer = setInterval(sendVideoFrame, VIDEO_FRAME_INTERVAL_MS);
-  appendVisionLog('音频和视频流已经开始发送。你可以像视频通话一样直接说话。');
+  appendVisionLog('WebSocket Manual 已启动：音频和视频正在持续发送。静默放物体后，先点“只提交静默画面到上下文”；随后说“刚才看到了什么”，再点“提交并请求模型回答”。');
 }
 
 async function startWebRtcRealtime() {
@@ -575,16 +579,15 @@ function selectRecommendedRealtimeMode(config) {
   if (!elements.realtimeMode || !config) {
     return;
   }
-  if (config.webRtcConfigured) {
+  if (config.webSocketConfigured || config.serverApiKeyConfigured) {
+    elements.realtimeMode.value = 'websocket';
+  } else if (config.webRtcConfigured) {
     elements.realtimeMode.value = 'webrtc';
   }
 }
 
 function resolveRealtimeMode(config) {
   const requested = elements.realtimeMode.value;
-  if (requested === 'websocket') {
-    throw new Error('当前 Vercel 部署不能稳定承载 WebSocket 长连接，请先使用 WebRTC，并确认 Key 和 Endpoint 属于同一个百炼业务空间。');
-  }
   return requested;
 }
 
@@ -595,6 +598,9 @@ function ensureRealtimeCanStart(mode, config) {
   const hasClientEndpoint = Boolean(readClientWebRtcEndpoint());
   if (mode === 'webrtc' && !hasClientKey && !hasServerKey) {
     throw new Error('服务端没有保存百炼 Key。请展开高级调试，临时填写并保存百炼 DashScope Key。');
+  }
+  if (mode === 'websocket' && !hasClientKey && !hasServerKey) {
+    throw new Error('WebSocket Manual 需要百炼 Key。请展开高级调试，临时填写并保存百炼 DashScope Key。');
   }
   if (mode === 'webrtc' && !hasClientEndpoint && !hasServerEndpoint) {
     throw new Error('服务端没有保存百炼 WebRTC Endpoint。请展开高级调试填写白名单 Endpoint。');
@@ -795,8 +801,11 @@ function updateRealtimeSession(options = {}) {
     return;
   }
 
+  const isManualWebSocket = realtime.mode === 'websocket';
   const vadProfile = options.vadProfile || DEFAULT_VAD_PROFILE;
-  const profileKey = `${vadProfile.type}:${vadProfile.threshold}:${vadProfile.silence_duration_ms}`;
+  const profileKey = isManualWebSocket
+    ? 'manual:null'
+    : `${vadProfile.type}:${vadProfile.threshold}:${vadProfile.silence_duration_ms}`;
   if (realtime.vadProfileKey === profileKey && options.reason !== 'context update') {
     return;
   }
@@ -808,8 +817,12 @@ function updateRealtimeSession(options = {}) {
         modalities: ['text', 'audio'],
       voice: appState.realtime?.voice || appState.realtimeConfig?.voice || 'Tina',
       input_audio_format: 'pcm',
+      sample_rate: AUDIO_INPUT_RATE,
       output_audio_format: 'pcm',
-      turn_detection: vadProfile,
+      input_audio_transcription: {
+        model: 'qwen3-asr-flash-realtime'
+      },
+      turn_detection: isManualWebSocket ? null : vadProfile,
       instructions: buildRealtimeInstructions()
     }
   };
@@ -818,6 +831,7 @@ function updateRealtimeSession(options = {}) {
     modalities: event.session.modalities,
     voice: event.session.voice,
     turnDetection: event.session.turn_detection,
+    manualMode: isManualWebSocket,
     reason: options.reason || '',
     target: elements.visionQuestion.value
   });
@@ -900,11 +914,45 @@ function sendRealtimeEvent(event) {
     return;
   }
 
+  if (!event.event_id && event.type !== 'proxy.auth') {
+    event.event_id = `event_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  }
   const text = JSON.stringify(event);
   if (realtime.mode === 'websocket' && realtime.socket?.readyState === WebSocket.OPEN) {
     realtime.socket.send(text);
   } else if (realtime.mode === 'webrtc' && realtime.eventChannel?.readyState === 'open') {
     realtime.eventChannel.send(text);
+  }
+}
+
+function commitRealtimeManualBuffer(options = {}) {
+  const realtime = appState.realtime;
+  if (!realtime || realtime.mode !== 'websocket' || !realtime.isReady) {
+    appendVisionLog('Manual 提交失败：请先选择 WebSocket Manual 并启动实时慧眼。');
+    return;
+  }
+  if (!appState.sentFirstAudio) {
+    appendVisionLog('Manual 提交失败：音频缓冲区还没初始化，请等 1 秒后再试。');
+    return;
+  }
+
+  sendRealtimeEvent({
+    type: 'input_audio_buffer.commit'
+  });
+  appState.sentFirstAudio = false;
+  recordRealtimeDebug('client.manual.commit', {
+    requestResponse: Boolean(options.requestResponse),
+    videoFramesDrawn: appState.videoFrameCount
+  });
+
+  if (options.requestResponse) {
+    appState.latestAssistantText = '';
+    sendRealtimeEvent({
+      type: 'response.create'
+    });
+    appendVisionLog('已提交当前音频和图像缓冲区，并请求模型回答。');
+  } else {
+    appendVisionLog('已提交当前音频和图像缓冲区，但暂不请求回答。稍后说出问题后，再点“提交并请求模型回答”。');
   }
 }
 
@@ -951,6 +999,15 @@ function sendVideoFrame() {
   const context = elements.videoFrame.getContext('2d');
   context.drawImage(elements.camera, 0, 0, width, height);
   const image = elements.videoFrame.toDataURL('image/jpeg', 0.5).replace(/^data:image\/jpeg;base64,/, '');
+  appState.videoFrameCount += 1;
+  if (appState.videoFrameCount === 1 || appState.videoFrameCount % 10 === 0) {
+    recordRealtimeDebug('websocket.video_frame.sent', {
+      count: appState.videoFrameCount,
+      width,
+      height,
+      base64Bytes: image.length
+    });
+  }
 
   sendRealtimeEvent({
     type: 'input_image_buffer.append',
@@ -960,8 +1017,8 @@ function sendVideoFrame() {
 
 async function checkSilentVideoPush() {
   const realtime = appState.realtime;
-  if (!realtime || realtime.mode !== 'webrtc' || !realtime.peer) {
-    appendVisionLog('静默视频推送自检失败：WebRTC 还没有接通。');
+  if (!realtime || !realtime.isReady) {
+    appendVisionLog('静默视频推送自检失败：实时慧眼还没有接通。');
     return;
   }
   if (realtime.silentVideoCheckRunning) {
@@ -971,7 +1028,24 @@ async function checkSilentVideoPush() {
 
   realtime.silentVideoCheckRunning = true;
   try {
-    appendVisionLog('静默视频推送自检开始：请保持不说话 10 秒，我只检查视频帧和字节是否继续增长。');
+    appendVisionLog('静默视频推送自检开始：请保持不说话 10 秒，我只检查视频帧是否继续发送。');
+    if (realtime.mode === 'websocket') {
+      const beforeFrames = appState.videoFrameCount;
+      recordRealtimeDebug('silent_video_check.websocket.before', { frames: beforeFrames });
+      await delay(SILENT_VIDEO_CHECK_MS);
+      const afterFrames = appState.videoFrameCount;
+      recordRealtimeDebug('silent_video_check.websocket.after', { frames: afterFrames });
+      const frameDelta = numberDelta(afterFrames, beforeFrames);
+      const text = frameDelta > 0
+        ? `静默视频推送自检通过：10 秒内你没有说话也没关系，WebSocket 图像仍在发送。增加 ${frameDelta} 帧。`
+        : '静默视频推送自检未通过：10 秒内 WebSocket 图像帧计数没有增长。';
+      appendVisionLog(text);
+      speak(text);
+      return;
+    }
+    if (realtime.mode !== 'webrtc' || !realtime.peer) {
+      throw new Error('当前接入方式没有可检查的视频统计。');
+    }
     const before = await getOutboundVideoStats(realtime.peer);
     recordRealtimeDebug('silent_video_check.before', before);
     await delay(SILENT_VIDEO_CHECK_MS);
@@ -1243,17 +1317,17 @@ function updateRealtimeConfigStatus(config) {
     elements.realtimeConfigStatus.textContent = '暂时无法确认百炼后台配置。';
     return;
   }
-  if (config.serverApiKeyConfigured && config.webRtcConfigured) {
-    elements.realtimeConfigStatus.textContent = '百炼后台已配置 Key 和 WebRTC Endpoint。手机端无需填写，直接点“开始实时慧眼”。';
+  if (config.serverApiKeyConfigured || config.webSocketConfigured) {
+    elements.realtimeConfigStatus.textContent = config.webRtcConfigured
+      ? '百炼后台已配置 Key 和 WebRTC Endpoint。默认可直接用 WebSocket Manual 测静默视觉记忆，也可切换 WebRTC 通话。'
+      : '百炼后台已配置 Key。默认可直接用 WebSocket Manual 测静默视觉记忆；WebRTC Endpoint 缺失不影响这个测试。';
     return;
   }
-  if (!config.serverApiKeyConfigured && !config.webRtcConfigured) {
-    elements.realtimeConfigStatus.textContent = '百炼后台还没有配置 Key 和 Endpoint。需要展开高级调试临时填写。';
+  if (!config.serverApiKeyConfigured && !config.webSocketConfigured) {
+    elements.realtimeConfigStatus.textContent = '百炼后台还没有配置 Key。需要展开高级调试临时填写 DashScope Key。';
     return;
   }
-  elements.realtimeConfigStatus.textContent = config.serverApiKeyConfigured
-    ? '百炼后台已有 Key，但缺少 WebRTC Endpoint。需要展开高级调试临时填写 Endpoint。'
-    : '百炼后台已有 WebRTC Endpoint，但缺少 Key。需要展开高级调试临时填写 Key。';
+  elements.realtimeConfigStatus.textContent = '百炼后台配置不完整，请展开高级调试检查 Key。';
 }
 
 function saveClientApiKey() {
