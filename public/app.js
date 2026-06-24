@@ -426,7 +426,9 @@ async function startRealtime() {
 }
 
 async function startWebSocketRealtime() {
-  const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/realtime/ws`);
+  const config = appState.realtimeConfig || await getRealtimeConfig();
+  const webSocketPath = config.webSocketPath || '/api/ws';
+  const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}${webSocketPath}`);
   const audioContext = new AudioContext();
   const player = new PcmPlayer(audioContext, AUDIO_OUTPUT_RATE);
 

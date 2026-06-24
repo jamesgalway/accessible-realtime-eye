@@ -171,7 +171,7 @@ async function handleApi(req, res, requestUrl) {
       region: BAILIAN_REALTIME_REGION,
       voice: BAILIAN_REALTIME_VOICE,
       deployMarker: DEPLOY_MARKER,
-      webSocketPath: '/api/realtime/ws',
+      webSocketPath: '/api/ws',
       webRtcSdpPath: '/api/realtime/sdp'
     });
     return;
