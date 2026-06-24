@@ -130,6 +130,7 @@ if (require.main === module) {
 
 module.exports = handleHttpRequest;
 module.exports.createHttpServer = createHttpServer;
+module.exports.createBrowserRealtimeServer = createBrowserRealtimeServer;
 module.exports.createRealtimeProxy = createRealtimeProxy;
 module.exports.handleApiRequest = handleApiRequest;
 module.exports.handleHttpRequest = handleHttpRequest;
