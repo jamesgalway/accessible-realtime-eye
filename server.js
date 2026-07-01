@@ -682,7 +682,14 @@ async function buildTransitSummary(data, request) {
       for (const step of steps.slice(0, 6)) {
         lines.push(`  - ${step.instruction || step.fallback}`);
       }
-      segments.push({ type: 'walk', distance: Number(walking.distance || 0), steps });
+      segments.push({
+        type: 'walk',
+        distance: Number(walking.distance || 0),
+        steps,
+        origin: normalizeCoordinate(walking.origin),
+        destination: normalizeCoordinate(walking.destination),
+        role: ''
+      });
     }
 
     const buslines = normalizeArray(segment.bus?.buslines);
@@ -704,16 +711,236 @@ async function buildTransitSummary(data, request) {
     }
   }
 
+  const transitPlan = await buildTransitThreePartPlan(segments, request);
+
   const facts = buildBaseFacts('transit', request, {
     routeDistance: Number(chosen.distance || 0),
     routeDuration: Number(chosen.duration || 0),
-    segments
+    segments,
+    transitPlan
   });
 
   return {
     summaryText: lines.join('\n'),
     ...await buildAccessibleNavigationResult(facts),
     facts
+  };
+}
+
+async function buildTransitThreePartPlan(segments, request) {
+  const vehicleEntries = segments
+    .map((segment, index) => ({ segment, index }))
+    .filter((entry) => entry.segment.type === 'vehicle');
+  if (!vehicleEntries.length) {
+    return {
+      available: false,
+      reason: 'no_vehicle_segment',
+      originalSegments: segments
+    };
+  }
+
+  const firstVehicleIndex = vehicleEntries[0].index;
+  const lastVehicleIndex = vehicleEntries[vehicleEntries.length - 1].index;
+  const initialWalk = segments.find((segment, index) => segment.type === 'walk' && index < firstVehicleIndex) || null;
+  const finalWalk = [...segments].reverse().find((segment, reverseIndex) => {
+    const index = segments.length - 1 - reverseIndex;
+    return segment.type === 'walk' && index > lastVehicleIndex;
+  }) || null;
+  const transferWalks = segments
+    .map((segment, index) => ({ ...segment, segmentIndex: index }))
+    .filter((segment) => segment.type === 'walk' && segment.segmentIndex > firstVehicleIndex && segment.segmentIndex < lastVehicleIndex);
+
+  const vehicles = vehicleEntries.map((entry) => ({ ...entry.segment, segmentIndex: entry.index }));
+  const boardingStop = vehicles[0]?.departureStop || {};
+  const arrivalStop = vehicles[vehicles.length - 1]?.arrivalStop || {};
+  const finalExitHint = extractMetroExitHintFromPoi(request.destinationPoi);
+  const finalExitResolution = finalExitHint
+    ? await resolveMetroExitPoi(finalExitHint, request)
+    : { hint: null, poi: null, locked: false, reason: 'no_exit_hint' };
+
+  let finalWalkForRender = finalWalk;
+  let finalWalkSource = finalWalk ? 'amap_transit_segment' : 'missing';
+  const finalExitCoordinate = getPoiNavigationCoordinate(finalExitResolution.poi);
+  if (finalExitCoordinate && request.destination) {
+    try {
+      const replannedFinalWalk = await fetchWalkingLeg(finalExitCoordinate, request.destination);
+      if (replannedFinalWalk?.steps?.length) {
+        finalWalkForRender = {
+          ...replannedFinalWalk,
+          type: 'walk',
+          role: 'final',
+          origin: finalExitCoordinate,
+          destination: request.destination,
+          source: 'exit_replanned'
+        };
+        finalWalkSource = 'exit_replanned';
+      }
+    } catch (error) {
+      finalExitResolution.walkReplanError = error.message || String(error);
+    }
+  }
+
+  return {
+    available: true,
+    initialWalk: initialWalk ? { ...initialWalk, role: 'initial' } : null,
+    vehicles,
+    transferWalks,
+    finalWalk: finalWalkForRender ? { ...finalWalkForRender, role: 'final' } : null,
+    boardingStop,
+    arrivalStop,
+    finalExit: finalExitResolution,
+    finalWalkSource
+  };
+}
+
+function extractMetroExitHintFromPoi(poi) {
+  if (!poi) {
+    return null;
+  }
+  const text = [poi.address, poi.name].map(normalizeTextValue).filter(Boolean).join(' ');
+  if (!text) {
+    return null;
+  }
+  const matches = [...text.matchAll(/(?:^|[（(，,；;\s])([^（）()，,；;\s]{1,20}?)(?:地铁站|站)\s*([0-9一二三四五六七八九十两]+号口)/g)];
+  if (!matches.length) {
+    return null;
+  }
+  const match = matches[matches.length - 1];
+  const stationName = normalizeMetroStationName(match[1]);
+  const exitName = normalizeExitName(match[2]);
+  if (!stationName || !exitName) {
+    return null;
+  }
+  return {
+    stationName,
+    exitName,
+    keyword: `${stationName}地铁站${exitName}`,
+    sourceText: match[0].trim()
+  };
+}
+
+function normalizeMetroStationName(value) {
+  return normalizeTextValue(value)
+    .replace(/[（(].*$/, '')
+    .replace(/地铁站$/, '')
+    .replace(/站$/, '')
+    .trim();
+}
+
+function normalizeExitName(value) {
+  const text = normalizeTextValue(value).trim();
+  const match = text.match(/([0-9一二三四五六七八九十两]+)号口/);
+  if (!match) {
+    return text;
+  }
+  const numberText = normalizeChineseNumber(match[1]);
+  return `${numberText}号口`;
+}
+
+function normalizeChineseNumber(value) {
+  const text = normalizeTextValue(value);
+  if (/^\d+$/.test(text)) {
+    return text;
+  }
+  const digits = {
+    一: 1,
+    二: 2,
+    两: 2,
+    三: 3,
+    四: 4,
+    五: 5,
+    六: 6,
+    七: 7,
+    八: 8,
+    九: 9
+  };
+  if (text === '十') {
+    return '10';
+  }
+  const tenMatch = text.match(/^十([一二两三四五六七八九])$/);
+  if (tenMatch) {
+    return String(10 + digits[tenMatch[1]]);
+  }
+  const compoundMatch = text.match(/^([一二两三四五六七八九])十([一二两三四五六七八九])?$/);
+  if (compoundMatch) {
+    return String(digits[compoundMatch[1]] * 10 + (compoundMatch[2] ? digits[compoundMatch[2]] : 0));
+  }
+  return String(digits[text] || text);
+}
+
+async function resolveMetroExitPoi(hint, request) {
+  const result = {
+    hint,
+    poi: null,
+    locked: false,
+    reason: ''
+  };
+  try {
+    const data = await callAmap('/v3/place/text', {
+      keywords: hint.keyword,
+      city: request.destinationCity || request.city || '上海',
+      citylimit: 'true',
+      offset: '10',
+      page: '1',
+      extensions: 'all'
+    });
+    const pois = Array.isArray(data.pois) ? data.pois.map(simplifyPoi) : [];
+    result.candidates = pois.slice(0, 5).map((poi) => ({
+      name: poi.name,
+      address: poi.address,
+      location: poi.location,
+      entrLocation: poi.entrLocation
+    }));
+    const selected = chooseMetroExitPoi(pois, hint);
+    if (!selected) {
+      result.reason = 'exit_poi_not_found';
+      return result;
+    }
+    result.poi = selected;
+    result.locked = Boolean(getPoiNavigationCoordinate(selected));
+    result.reason = result.locked ? 'exit_poi_locked' : 'exit_poi_without_coordinate';
+    return result;
+  } catch (error) {
+    result.reason = 'exit_poi_search_failed';
+    result.error = error.message || String(error);
+    return result;
+  }
+}
+
+function chooseMetroExitPoi(pois, hint) {
+  const exitNumber = normalizeExitName(hint.exitName).replace('号口', '');
+  const scored = pois
+    .map((poi, index) => {
+      const text = `${normalizeTextValue(poi.name)} ${normalizeTextValue(poi.address)} ${normalizeTextValue(poi.type)}`;
+      let score = 0;
+      if (text.includes(hint.stationName)) score += 4;
+      if (text.includes(hint.exitName)) score += 5;
+      if (new RegExp(`${exitNumber}\\s*号?口`).test(text)) score += 4;
+      if (/地铁|轨道交通|出入口|地铁站/.test(text)) score += 2;
+      if (getPoiNavigationCoordinate(poi)) score += 2;
+      return { poi, score, index };
+    })
+    .filter((item) => item.score >= 7)
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+  return scored[0]?.poi || null;
+}
+
+function getPoiNavigationCoordinate(poi) {
+  return normalizeCoordinate(poi?.entrLocation) || normalizeCoordinate(poi?.location);
+}
+
+async function fetchWalkingLeg(origin, destination) {
+  const data = await callAmap('/v3/direction/walking', { origin, destination });
+  const paths = data.route?.paths || [];
+  if (!Array.isArray(paths) || !paths.length) {
+    return null;
+  }
+  const chosen = paths[0];
+  const steps = await enrichWalkingStepsWithRoadAnchors(normalizeArray(chosen.steps).map(simplifyWalkingStep));
+  return {
+    distance: Number(chosen.distance || 0),
+    duration: Number(chosen.duration || 0),
+    steps
   };
 }
 
@@ -761,21 +988,70 @@ async function buildAccessibleNavigationResult(facts) {
   const collector = createRouteStepCollector(facts);
 
   if (facts.mode === 'transit') {
-    lines.push('总流程：先完成起点到上车站的步行段，再乘车，最后完成下车站到目的地的步行段。');
-    lines.push('公交站提醒：站名不等于站杆所在马路一侧。当前如果没有单独站杆路侧坐标，不能直接说“沿左边/右边就能找到站”。');
-    lines.push('');
+    const transitPlan = facts.transitPlan;
+    if (transitPlan?.available) {
+      lines.push('总流程：三段体。第一段到上车站，第二段乘车和换乘，第三段从下车站指定出口到目的地。');
+      lines.push('');
 
-    for (const [index, segment] of (facts.segments || []).entries()) {
-      if (segment.type === 'walk') {
-        lines.push(...await renderAccessibleWalkLeg(segment.steps || [], `步行段 ${index + 1}`, segment.distance, facts, {
+      lines.push('第一段：从起点到上车地铁站。');
+      if (transitPlan.initialWalk?.steps?.length) {
+        const firstWalkFacts = buildTransitWalkFacts(facts, {
+          origin: facts.origin,
+          originPoi: facts.originPoi,
+          destination: getStopCoordinate(transitPlan.boardingStop) || transitPlan.initialWalk.destination || '',
+          destinationPoi: buildStopPoi(transitPlan.boardingStop, '上车站')
+        });
+        lines.push(...await renderAccessibleWalkLeg(transitPlan.initialWalk.steps || [], '第一段步行', transitPlan.initialWalk.distance, firstWalkFacts, {
           collector,
-          legIndex: index,
-          legLabel: `步行段 ${index + 1}`
+          legIndex: 0,
+          legLabel: '第一段步行'
         }));
-      } else if (segment.type === 'vehicle') {
-        lines.push(...renderAccessibleVehicleLeg(segment, `乘车段 ${index + 1}`));
+      } else {
+        lines.push('第一段步行：高德没有返回可拆分步行段；到上车站附近后，用站名和现场导向确认入口。');
       }
       lines.push('');
+
+      lines.push('第二段：地铁乘车和换乘。');
+      lines.push(...renderAccessibleTransitRideSection(transitPlan));
+      lines.push('');
+
+      lines.push('第三段：从下车站指定出口到目的地。');
+      lines.push(...renderFinalExitLockLines(transitPlan));
+      if (transitPlan.finalWalk?.steps?.length) {
+        const finalOriginPoi = transitPlan.finalExit?.locked
+          ? transitPlan.finalExit.poi
+          : buildStopPoi(transitPlan.arrivalStop, '下车站');
+        const finalWalkFacts = buildTransitWalkFacts(facts, {
+          origin: getPoiNavigationCoordinate(finalOriginPoi) || getStopCoordinate(transitPlan.arrivalStop) || transitPlan.finalWalk.origin || '',
+          originPoi: finalOriginPoi,
+          destination: facts.destination,
+          destinationPoi: facts.destinationPoi
+        });
+        lines.push(...await renderAccessibleWalkLeg(transitPlan.finalWalk.steps || [], '第三段步行', transitPlan.finalWalk.distance, finalWalkFacts, {
+          collector,
+          legIndex: 2,
+          legLabel: '第三段步行'
+        }));
+      } else {
+        lines.push('第三段步行：高德没有返回下车后步行细节；到站后先按站内导向确认出口，再用慧眼确认目的地入口。');
+      }
+    } else {
+      lines.push('总流程：先完成起点到上车站的步行段，再乘车，最后完成下车站到目的地的步行段。');
+      lines.push('公交站提醒：站名不等于站杆所在马路一侧。当前如果没有单独站杆路侧坐标，不能直接说“沿左边/右边就能找到站”。');
+      lines.push('');
+
+      for (const [index, segment] of (facts.segments || []).entries()) {
+        if (segment.type === 'walk') {
+          lines.push(...await renderAccessibleWalkLeg(segment.steps || [], `步行段 ${index + 1}`, segment.distance, facts, {
+            collector,
+            legIndex: index,
+            legLabel: `步行段 ${index + 1}`
+          }));
+        } else if (segment.type === 'vehicle') {
+          lines.push(...renderAccessibleVehicleLeg(segment, `乘车段 ${index + 1}`));
+        }
+        lines.push('');
+      }
     }
   } else if (facts.mode === 'walking') {
     lines.push(...await renderAccessibleWalkLeg(facts.walkingSteps || [], '全程步行段', facts.routeDistance, facts, {
@@ -805,6 +1081,89 @@ function renderAccessibleVehicleLeg(segment, label) {
     `下车站：${arrival}。途经约 ${viaNum} 个中间站后下车。`,
     '下车后不要立刻按东西南北走，先确认自己站在道路哪一侧，再进入下一段步行。'
   ];
+}
+
+function renderAccessibleTransitRideSection(transitPlan) {
+  const lines = [];
+  const vehicles = transitPlan.vehicles || [];
+  if (!vehicles.length) {
+    return ['高德没有返回可用乘车段。'];
+  }
+  vehicles.forEach((segment, index) => {
+    const departure = segment.departureStop?.name || '未知上车站';
+    const arrival = segment.arrivalStop?.name || '未知下车站';
+    const name = segment.name || '未知线路';
+    const viaNum = Number(segment.viaNum || 0);
+    const viaStops = (segment.viaStops || []).map((stop) => stop.name).filter(Boolean);
+    lines.push(`${index + 1}. 乘坐 ${name}，从 ${departure} 上车，到 ${arrival} 下车，途经约 ${viaNum} 个中间站。`);
+    if (viaStops.length) {
+      lines.push(`   途经站：${viaStops.join('、')}。`);
+    }
+    const transferWalk = (transitPlan.transferWalks || [])[index];
+    const nextVehicle = vehicles[index + 1];
+    if (nextVehicle) {
+      const transferDistance = transferWalk ? formatMeters(transferWalk.distance) : '距离未知';
+      const nextName = nextVehicle.name || '下一条线路';
+      const nextDeparture = nextVehicle.departureStop?.name || arrival;
+      lines.push(`   在 ${arrival} 换乘 ${nextName}；站内换乘步行约 ${transferDistance}，跟随站内导向到 ${nextDeparture} 的站台。`);
+    }
+  });
+  const finalArrival = vehicles[vehicles.length - 1]?.arrivalStop?.name || '';
+  if (finalArrival) {
+    lines.push(`到 ${finalArrival} 下车后，先按站内导向找出口；不要把站厅中心点当成第三段起点。`);
+  }
+  return lines;
+}
+
+function renderFinalExitLockLines(transitPlan) {
+  const lines = [];
+  const exit = transitPlan.finalExit;
+  if (exit?.locked && exit.poi) {
+    const hintText = exit.hint ? `${exit.hint.stationName}站${exit.hint.exitName}` : exit.poi.name;
+    lines.push(`已锁定出站口：高德目的地提示使用 ${hintText}；第三段以这个出口作为起点。`);
+    lines.push('出站后先站在口外面对马路，再按下面的步行段走。');
+    if (transitPlan.finalWalkSource === 'exit_replanned') {
+      lines.push('第三段步行已按这个出口坐标重新规划，不使用站厅中心点。');
+    }
+  } else if (exit?.hint) {
+    lines.push(`目的地信息提示 ${exit.hint.stationName}站${exit.hint.exitName}，但当前没有锁定到可用出口坐标。`);
+    lines.push('第三段暂用高德原始下车后步行段；到站后先按站内导向确认出口。');
+  } else {
+    lines.push('当前目的地信息没有明确出站口；第三段暂用高德原始下车后步行段。');
+  }
+  return lines;
+}
+
+function buildTransitWalkFacts(facts, overrides = {}) {
+  return {
+    ...facts,
+    ...overrides,
+    mode: 'walking'
+  };
+}
+
+function getStopCoordinate(stop) {
+  return normalizeCoordinate(stop?.location);
+}
+
+function buildStopPoi(stop, fallbackName) {
+  const name = normalizeTextValue(stop?.name) || fallbackName || '站点';
+  const location = getStopCoordinate(stop);
+  return {
+    id: normalizeTextValue(stop?.id),
+    name,
+    type: 'transit_stop',
+    address: name,
+    streetNumber: '',
+    streetNumberParity: '',
+    location,
+    entrLocation: location,
+    exitLocation: '',
+    adname: '',
+    cityname: '',
+    pname: '',
+    tel: ''
+  };
 }
 
 function createRouteStepCollector(facts) {
