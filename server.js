@@ -754,9 +754,17 @@ async function buildTransitThreePartPlan(segments, request) {
   const boardingStop = vehicles[0]?.departureStop || {};
   const arrivalStop = vehicles[vehicles.length - 1]?.arrivalStop || {};
   const finalExitHint = extractMetroExitHintFromPoi(request.destinationPoi);
-  const finalExitResolution = finalExitHint
+  let finalExitResolution = finalExitHint
     ? await resolveMetroExitPoi(finalExitHint, request)
     : { hint: null, poi: null, locked: false, reason: 'no_exit_hint' };
+  if (!finalExitResolution.locked) {
+    const inferredExit = await resolveMetroExitFromFinalWalk(arrivalStop, finalWalk, request);
+    if (inferredExit.locked) {
+      finalExitResolution = inferredExit;
+    } else {
+      finalExitResolution.inferredExit = inferredExit;
+    }
+  }
 
   let finalWalkForRender = finalWalk;
   let finalWalkSource = finalWalk ? 'amap_transit_segment' : 'missing';
@@ -873,7 +881,8 @@ async function resolveMetroExitPoi(hint, request) {
     hint,
     poi: null,
     locked: false,
-    reason: ''
+    reason: '',
+    source: 'destination_hint'
   };
   try {
     const data = await callAmap('/v3/place/text', {
@@ -907,6 +916,90 @@ async function resolveMetroExitPoi(hint, request) {
   }
 }
 
+async function resolveMetroExitFromFinalWalk(arrivalStop, finalWalk, request) {
+  const stationName = normalizeMetroStationName(arrivalStop?.name);
+  const referenceLocation = normalizeCoordinate(request.destination) || getFinalWalkStartCoordinate(finalWalk) || getStopCoordinate(arrivalStop);
+  const result = {
+    hint: null,
+    poi: null,
+    locked: false,
+    reason: '',
+    source: normalizeCoordinate(request.destination) ? 'nearest_to_destination' : 'final_walk_start',
+    stationName,
+    referenceLocation
+  };
+  if (!stationName || !referenceLocation) {
+    result.reason = 'missing_station_or_reference';
+    return result;
+  }
+
+  try {
+    const aroundData = await callAmap('/v3/place/around', {
+      location: referenceLocation,
+      keywords: `${stationName}地铁站`,
+      radius: '800',
+      offset: '25',
+      page: '1',
+      extensions: 'all'
+    });
+    let pois = Array.isArray(aroundData.pois) ? aroundData.pois.map(simplifyPoi) : [];
+    pois = mergePoiCandidates(pois, await searchMetroExitTextPois(`${stationName}地铁站出口`, request));
+    if (!pois.some((poi) => isLikelyStationExitPoi(poi, stationName))) {
+      for (let exitNumber = 1; exitNumber <= 12; exitNumber += 1) {
+        pois = mergePoiCandidates(pois, await searchMetroExitTextPois(`${stationName}地铁站${exitNumber}号口`, request));
+      }
+    }
+    result.candidates = pois.slice(0, 8).map((poi) => ({
+      name: poi.name,
+      address: poi.address,
+      location: poi.location,
+      entrLocation: poi.entrLocation
+    }));
+    const selected = chooseExitPoiNearReference(pois, stationName, referenceLocation);
+    if (!selected) {
+      result.reason = 'nearby_exit_poi_not_found';
+      return result;
+    }
+    result.poi = selected.poi;
+    result.locked = true;
+    result.reason = result.source === 'nearest_to_destination'
+      ? 'exit_selected_nearest_to_destination'
+      : 'exit_inferred_from_final_walk_start';
+    result.distanceToReferenceMeters = Math.round(selected.distanceMeters);
+    return result;
+  } catch (error) {
+    result.reason = 'nearby_exit_search_failed';
+    result.error = error.message || String(error);
+    return result;
+  }
+}
+
+async function searchMetroExitTextPois(keyword, request) {
+  const data = await callAmap('/v3/place/text', {
+    keywords: keyword,
+    city: request.destinationCity || request.city || '上海',
+    citylimit: 'true',
+    offset: '10',
+    page: '1',
+    extensions: 'all'
+  });
+  return Array.isArray(data.pois) ? data.pois.map(simplifyPoi) : [];
+}
+
+function mergePoiCandidates(existing, incoming) {
+  const merged = [];
+  const seen = new Set();
+  for (const poi of [...(existing || []), ...(incoming || [])]) {
+    const key = poi.id || `${poi.name}|${getPoiNavigationCoordinate(poi)}|${poi.address}`;
+    if (!key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    merged.push(poi);
+  }
+  return merged;
+}
+
 function chooseMetroExitPoi(pois, hint) {
   const exitNumber = normalizeExitName(hint.exitName).replace('号口', '');
   const scored = pois
@@ -925,8 +1018,54 @@ function chooseMetroExitPoi(pois, hint) {
   return scored[0]?.poi || null;
 }
 
+function isLikelyStationExitPoi(poi, stationName) {
+  const text = `${normalizeTextValue(poi?.name)} ${normalizeTextValue(poi?.address)} ${normalizeTextValue(poi?.type)}`;
+  return text.includes(stationName) && isMetroExitText(text) && Boolean(getPoiNavigationCoordinate(poi));
+}
+
+function chooseExitPoiNearReference(pois, stationName, referenceLocation) {
+  const reference = parseLngLat(referenceLocation);
+  if (!reference) {
+    return null;
+  }
+  const scored = pois
+    .map((poi, index) => {
+      const coordinate = getPoiNavigationCoordinate(poi);
+      const point = parseLngLat(coordinate);
+      const text = `${normalizeTextValue(poi.name)} ${normalizeTextValue(poi.address)} ${normalizeTextValue(poi.type)}`;
+      if (!point || !isLikelyStationExitPoi(poi, stationName)) {
+        return null;
+      }
+      const distanceToReference = distanceMeters(point, reference);
+      let score = 0;
+      if (distanceToReference <= 50) score += 12;
+      else if (distanceToReference <= 100) score += 9;
+      else if (distanceToReference <= 200) score += 5;
+      else if (distanceToReference <= 400) score += 2;
+      else score -= 10;
+      score += text.includes('地铁站') ? 3 : 0;
+      score += /[0-9一二三四五六七八九十两]+\s*号口/.test(text) ? 4 : 0;
+      score += /出入口|出口/.test(text) ? 2 : 0;
+      return { poi, score, index, distanceMeters: distanceToReference };
+    })
+    .filter(Boolean)
+    .filter((item) => item.score >= 6)
+    .sort((a, b) => b.score - a.score || a.distanceMeters - b.distanceMeters || a.index - b.index);
+  return scored[0] || null;
+}
+
+function isMetroExitText(text) {
+  return /[0-9一二三四五六七八九十两]+\s*号口|出入口|出口/.test(normalizeTextValue(text));
+}
+
 function getPoiNavigationCoordinate(poi) {
   return normalizeCoordinate(poi?.entrLocation) || normalizeCoordinate(poi?.location);
+}
+
+function getFinalWalkStartCoordinate(finalWalk) {
+  return normalizeCoordinate(finalWalk?.origin)
+    || getPolylineEndpoints(combineStepPolylines(finalWalk?.steps || [])).start
+    || '';
 }
 
 async function fetchWalkingLeg(origin, destination) {
@@ -1019,7 +1158,7 @@ async function buildAccessibleNavigationResult(facts) {
       lines.push(...renderFinalExitLockLines(transitPlan));
       if (transitPlan.finalWalk?.steps?.length) {
         const finalOriginPoi = transitPlan.finalExit?.locked
-          ? transitPlan.finalExit.poi
+          ? buildTransitExitOriginPoi(transitPlan.finalExit.poi, transitPlan.finalWalk.steps || [])
           : buildStopPoi(transitPlan.arrivalStop, '下车站');
         const finalWalkFacts = buildTransitWalkFacts(facts, {
           origin: getPoiNavigationCoordinate(finalOriginPoi) || getStopCoordinate(transitPlan.arrivalStop) || transitPlan.finalWalk.origin || '',
@@ -1120,16 +1259,21 @@ function renderFinalExitLockLines(transitPlan) {
   const exit = transitPlan.finalExit;
   if (exit?.locked && exit.poi) {
     const hintText = exit.hint ? `${exit.hint.stationName}站${exit.hint.exitName}` : exit.poi.name;
-    lines.push(`已锁定出站口：高德目的地提示使用 ${hintText}；第三段以这个出口作为起点。`);
+    const sourceText = exit.source === 'nearest_to_destination'
+      ? '目的地没有指定出口，已从下车站可查出口中自动选择离目的地最近的出口'
+      : exit.source === 'final_walk_start'
+      ? '根据下车站和高德最后步行起点反推出这个出口'
+      : '高德目的地提示使用这个出口';
+    lines.push(`已锁定出站口：${hintText}；${sourceText}。第三段以这个出口作为起点。`);
     lines.push('出站后先站在口外面对马路，再按下面的步行段走。');
     if (transitPlan.finalWalkSource === 'exit_replanned') {
       lines.push('第三段步行已按这个出口坐标重新规划，不使用站厅中心点。');
     }
   } else if (exit?.hint) {
     lines.push(`目的地信息提示 ${exit.hint.stationName}站${exit.hint.exitName}，但当前没有锁定到可用出口坐标。`);
-    lines.push('第三段暂用高德原始下车后步行段；到站后先按站内导向确认出口。');
+    lines.push('第三段出口未闭环：不能把站厅中心点或模糊下车点当作合格第三段起点。');
   } else {
-    lines.push('当前目的地信息没有明确出站口；第三段暂用高德原始下车后步行段。');
+    lines.push('第三段出口未闭环：目的地没有明确出口提示，附近出口反查也没有锁定到可用出口。');
   }
   return lines;
 }
@@ -1163,6 +1307,17 @@ function buildStopPoi(stop, fallbackName) {
     cityname: '',
     pname: '',
     tel: ''
+  };
+}
+
+function buildTransitExitOriginPoi(poi, steps) {
+  const firstRoad = normalizeTextValue((steps || [])[0]?.road);
+  const startSide = inferPreferredSideForRoad(steps || [], 0);
+  return {
+    ...poi,
+    isTransitExit: true,
+    knownFacingRoad: firstRoad,
+    knownStartSide: normalizeSideValue(startSide)
   };
 }
 
@@ -1537,7 +1692,16 @@ function initWalkingRouteState(steps, facts = {}) {
   };
   const first = steps[0];
   const second = steps[1];
-  if (!first || !second || normalizeTextValue(first.road)) {
+  const firstRoad = normalizeTextValue(first?.road);
+  if (firstRoad) {
+    const knownStartSide = normalizeSideValue(facts.originPoi?.knownStartSide);
+    if (facts.originPoi?.isTransitExit && knownStartSide) {
+      state.currentRoad = firstRoad;
+      state.currentSide = knownStartSide;
+    }
+    return state;
+  }
+  if (!first || !second) {
     return state;
   }
   const direction = getTurnDirection(first, second);
