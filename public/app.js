@@ -6,6 +6,10 @@ const AUDIO_SEND_BYTES = 3200;
 const VIDEO_FRAME_INTERVAL_MS = 1000;
 const VIDEO_TRACK_DRAW_INTERVAL_MS = 1000;
 const SILENT_VIDEO_CHECK_MS = 10000;
+const MANUAL_LOCAL_VAD_START_RMS = 0.018;
+const MANUAL_LOCAL_VAD_END_RMS = 0.010;
+const MANUAL_LOCAL_VAD_END_MS = 900;
+const MANUAL_LOCAL_VAD_MIN_AUDIO_MS = 500;
 const DEFAULT_VAD_PROFILE = {
   type: 'semantic_vad',
   threshold: 0.65,
@@ -20,6 +24,8 @@ const ASSISTANT_PLAYBACK_VAD_PROFILE = {
 };
 const CLIENT_API_KEY_STORAGE = 'accessibleNav.dashscopeKey';
 const CLIENT_WEBRTC_ENDPOINT_STORAGE = 'accessibleNav.webrtcEndpoint';
+const FOLLOW_ROUTE_MATCH_METERS = 45;
+const FOLLOW_OFF_ROUTE_LIMIT = 3;
 
 const appState = {
   origin: null,
@@ -37,7 +43,8 @@ const appState = {
   cameraInfo: null,
   videoFrameCount: 0,
   assistantMicMuteTimer: null,
-  assistantVadRestoreTimer: null
+  assistantVadRestoreTimer: null,
+  navigationFollow: null
 };
 
 const elements = {
@@ -46,9 +53,11 @@ const elements = {
   origin: document.querySelector('#origin'),
   destination: document.querySelector('#destination'),
   mode: document.querySelector('#mode'),
+  poiStatus: document.querySelector('#poi-status'),
   poiResults: document.querySelector('#poi-results'),
   manualRoute: document.querySelector('#manual-route'),
   routeOutput: document.querySelector('#route-output'),
+  followOutput: document.querySelector('#follow-output'),
   visionOutput: document.querySelector('#vision-output'),
   camera: document.querySelector('#camera'),
   videoFrame: document.querySelector('#video-frame'),
@@ -63,7 +72,9 @@ const elements = {
   checkSilentVideo: document.querySelector('#check-silent-video'),
   commitSilentContext: document.querySelector('#commit-silent-context'),
   commitAndRespond: document.querySelector('#commit-and-respond'),
-  copyRealtimeLog: document.querySelector('#copy-realtime-log')
+  copyRealtimeLog: document.querySelector('#copy-realtime-log'),
+  startFollow: document.querySelector('#start-follow'),
+  stopFollow: document.querySelector('#stop-follow')
 };
 
 document.querySelector('#use-location').addEventListener('click', useCurrentLocation);
@@ -72,6 +83,8 @@ document.querySelector('#search-destination').addEventListener('click', () => se
 document.querySelector('#plan-route').addEventListener('click', planRoute);
 document.querySelector('#load-manual-route').addEventListener('click', loadManualRoute);
 document.querySelector('#speak-route').addEventListener('click', () => speak(elements.routeOutput.textContent));
+document.querySelector('#start-follow').addEventListener('click', startNavigationFollow);
+document.querySelector('#stop-follow').addEventListener('click', stopNavigationFollow);
 document.querySelector('#start-realtime').addEventListener('click', startRealtime);
 document.querySelector('#send-context').addEventListener('click', sendRealtimeContext);
 document.querySelector('#stop-realtime').addEventListener('click', stopRealtime);
@@ -103,8 +116,8 @@ async function checkHealth() {
       '后端已启动。',
       data.amapConfigured ? '高德 Key 已配置。' : '高德 Key 未配置，暂时不能真实规划路线。',
       data.bailianConfigured ? '服务端百炼 Key 已配置，手机端无需填写 Key。' : '服务端百炼 Key 未配置，可展开高级调试临时填写 Key。',
-      data.realtimeWebSocketConfigured ? 'WebSocket Manual 可用于静默视觉记忆测试。' : 'WebSocket Manual 需要服务端百炼 Key，或在高级调试临时填写 Key。',
-      data.realtimeWebRtcConfigured ? 'WebRTC Endpoint 已配置。' : 'WebRTC Endpoint 未配置，不影响 WebSocket Manual 测试。'
+      data.realtimeWebRtcConfigured ? 'WebRTC Endpoint 已配置，演示默认使用 WebRTC。' : 'WebRTC Endpoint 未配置，实时慧眼演示不可用。',
+      data.realtimeWebSocketConfigured ? 'WebSocket Manual 可用于静默上下文诊断。' : 'WebSocket Manual 当前不可用。'
     ];
     elements.health.textContent = parts.join('');
   } catch (error) {
@@ -177,43 +190,70 @@ function renderPoiResults(kind, pois) {
   }
 
   const title = document.createElement('h3');
-  title.textContent = `搜索结果：请选择一个作为${kind === 'origin' ? '起点' : '终点'}`;
+  title.id = 'poi-results-title';
+  title.textContent = `搜索到 ${pois.length} 个地点。请选择一个作为${kind === 'origin' ? '起点' : '终点'}`;
   elements.poiResults.append(title);
 
-  for (const poi of pois) {
+  const list = document.createElement('div');
+  list.setAttribute('role', 'list');
+  list.className = 'result-list';
+  elements.poiResults.append(list);
+
+  let firstButton = null;
+  pois.forEach((poi, index) => {
     const item = document.createElement('article');
     item.className = 'result-item';
+    item.setAttribute('role', 'listitem');
 
     const text = document.createElement('p');
     const address = poi.address || poi.adname || '地址未返回';
     const entrance = poi.entrLocation ? `，入口坐标 ${poi.entrLocation}` : '';
-    text.textContent = `${poi.name}，${address}，坐标 ${poi.location}${entrance}`;
+    text.id = `poi-result-${kind}-${index + 1}`;
+    text.textContent = `第 ${index + 1} 条，${poi.name}，${address}，坐标 ${poi.location}${entrance}`;
 
     const button = document.createElement('button');
     button.type = 'button';
-    button.textContent = `设为${kind === 'origin' ? '起点' : '终点'}：${poi.name}`;
+    button.textContent = `选择第 ${index + 1} 条作为${kind === 'origin' ? '起点' : '终点'}：${poi.name}`;
+    button.setAttribute('aria-describedby', text.id);
     button.addEventListener('click', () => setSelectedPoi(kind, poi));
+    if (!firstButton) {
+      firstButton = button;
+    }
 
     item.append(text, button);
-    elements.poiResults.append(item);
-  }
+    list.append(item);
+  });
+
+  setPoiStatus(`搜索到 ${pois.length} 个地点，结果已经显示在搜索按钮下方。旁白焦点会移动到第一条结果。`);
+  window.setTimeout(() => firstButton?.focus(), 80);
 }
 
 function setSelectedPoi(kind, poi) {
   if (kind === 'origin') {
     appState.origin = poi;
-    elements.origin.value = `${poi.name}：${poi.location}`;
+    elements.origin.value = `${poi.name}：${routeCoordinateForPoi(poi)}`;
   } else {
     appState.destination = poi;
-    elements.destination.value = `${poi.name}：${poi.location}`;
+    elements.destination.value = `${poi.name}：${routeCoordinateForPoi(poi)}`;
   }
-  setPoiStatus(`已设置${kind === 'origin' ? '起点' : '终点'}：${poi.name}，坐标 ${poi.location}`);
+  const coordinate = routeCoordinateForPoi(poi);
+  const coordinateNote = poi.entrLocation && poi.entrLocation !== poi.location
+    ? `已优先使用入口坐标 ${poi.entrLocation}，不是 POI 中心点 ${poi.location}`
+    : `坐标 ${coordinate}`;
+  setPoiStatus(`已设置${kind === 'origin' ? '起点' : '终点'}：${poi.name}，${coordinateNote}`);
+  window.setTimeout(() => {
+    if (kind === 'origin') {
+      elements.destination.focus();
+    } else {
+      document.querySelector('#plan-route')?.focus();
+    }
+  }, 80);
 }
 
 async function planRoute() {
   const city = elements.city.value.trim() || '上海';
-  const origin = appState.origin?.location || extractCoordinate(elements.origin.value);
-  const destination = appState.destination?.location || extractCoordinate(elements.destination.value);
+  const origin = routeCoordinateForPoi(appState.origin) || extractCoordinate(elements.origin.value);
+  const destination = routeCoordinateForPoi(appState.destination) || extractCoordinate(elements.destination.value);
 
   if (!origin || !destination) {
     elements.routeOutput.textContent = '请先搜索并选择起点、终点，或者直接输入高德坐标。';
@@ -228,7 +268,9 @@ async function planRoute() {
       destination,
       city,
       destinationCity: city,
-      mode: elements.mode.value
+      mode: elements.mode.value,
+      originPoi: appState.origin,
+      destinationPoi: appState.destination
     });
 
     appState.route = {
@@ -238,19 +280,12 @@ async function planRoute() {
       destinationPoi: appState.destination,
       request: data.request,
       facts: data.facts,
-      summaryText: data.summaryText
+      structuredRoute: data.structuredRoute,
+      summaryText: data.summaryText,
+      accessibleScript: data.accessibleScript
     };
 
-    const text = [
-      '路线已生成。',
-      '',
-      `起点：${appState.origin?.name || origin}`,
-      `终点：${appState.destination?.name || destination}`,
-      '',
-      data.summaryText,
-      '',
-      '规则提醒：这一版先锁地图事实。左边、右边、过街次数，需要在后续版本用统一坐标和物理推理补齐，不能由模型猜。'
-    ].join('\n');
+    const text = data.accessibleScript || data.summaryText || '暂时没有生成可执行路线。';
 
     elements.routeOutput.textContent = text;
     speak(firstSpeechParagraph(text));
@@ -259,6 +294,13 @@ async function planRoute() {
     elements.routeOutput.textContent = `路线规划失败：${error.message}`;
     speak(`路线规划失败：${error.message}`);
   }
+}
+
+function routeCoordinateForPoi(poi) {
+  if (!poi) {
+    return '';
+  }
+  return poi.entrLocation || poi.location || '';
 }
 
 function loadManualRoute() {
@@ -300,6 +342,250 @@ function loadManualRoute() {
   elements.routeOutput.textContent = output;
   speak(firstSpeechParagraph(output));
   sendRealtimeContext({ quiet: true });
+}
+
+function startNavigationFollow() {
+  const structuredRoute = appState.route?.structuredRoute;
+  const followSteps = Array.isArray(structuredRoute?.followSteps) ? structuredRoute.followSteps : [];
+  if (!followSteps.length) {
+    updateFollowOutput('还没有可跟随的结构化无障碍路线。请先生成路线。');
+    speak('请先生成路线，再开始 GPS 跟随播报。');
+    return;
+  }
+  if (!navigator.geolocation) {
+    updateFollowOutput('这个浏览器不支持 GPS 定位。');
+    speak('这个浏览器不支持定位。');
+    return;
+  }
+  if (!window.isSecureContext && location.hostname !== '127.0.0.1' && location.hostname !== 'localhost') {
+    updateFollowOutput('浏览器定位需要 HTTPS。请用 HTTPS 页面打开这个原型。');
+    speak('浏览器定位需要 HTTPS。');
+    return;
+  }
+  if (appState.navigationFollow?.watchId !== undefined && appState.navigationFollow?.watchId !== null) {
+    updateFollowOutput('GPS 跟随已经在运行。');
+    return;
+  }
+
+  appState.navigationFollow = {
+    watchId: null,
+    route: structuredRoute,
+    currentStepId: '',
+    announcedStepIds: new Set(),
+    announcedTurnThresholds: new Set(),
+    offRouteCount: 0,
+    lastOffRouteSpeechAt: 0
+  };
+
+  const watchId = navigator.geolocation.watchPosition(
+    handleFollowPosition,
+    handleFollowError,
+    {
+      enableHighAccuracy: true,
+      maximumAge: 1000,
+      timeout: 15000
+    }
+  );
+  appState.navigationFollow.watchId = watchId;
+  updateFollowOutput('GPS 跟随已启动。请在手机上允许定位。第一版只支持前台网页，锁屏或切后台可能停止。');
+  speak('GPS 跟随已启动。请允许定位。');
+}
+
+function stopNavigationFollow() {
+  const follow = appState.navigationFollow;
+  if (follow?.watchId !== undefined && follow?.watchId !== null) {
+    navigator.geolocation.clearWatch(follow.watchId);
+  }
+  appState.navigationFollow = null;
+  updateFollowOutput('GPS 跟随已停止。');
+}
+
+function handleFollowError(error) {
+  const message = error?.message || '定位失败。';
+  updateFollowOutput(`GPS 跟随定位失败：${message}`);
+  speak(`定位失败：${message}`);
+}
+
+function handleFollowPosition(position) {
+  const follow = appState.navigationFollow;
+  const steps = follow?.route?.followSteps || [];
+  if (!follow || !steps.length) {
+    return;
+  }
+
+  const location = `${position.coords.longitude},${position.coords.latitude}`;
+  const accuracy = Number(position.coords.accuracy || 0);
+  const match = matchLocationToFollowSteps(location, steps);
+  if (!match) {
+    updateFollowOutput(`当前位置：${location}。暂时无法匹配到路线。定位精度约 ${formatFollowMeters(accuracy)}。`);
+    return;
+  }
+
+  const threshold = Math.max(FOLLOW_ROUTE_MATCH_METERS, accuracy + 25);
+  if (match.distanceMeters > threshold) {
+    follow.offRouteCount += 1;
+    const text = `当前位置离规划路线约 ${formatFollowMeters(match.distanceMeters)}，定位精度约 ${formatFollowMeters(accuracy)}。可能偏离路线，请先停下确认。`;
+    updateFollowOutput(text);
+    const now = Date.now();
+    if (follow.offRouteCount >= FOLLOW_OFF_ROUTE_LIMIT && now - follow.lastOffRouteSpeechAt > 20000) {
+      follow.lastOffRouteSpeechAt = now;
+      speak('可能偏离路线，请先停下确认。');
+    }
+    return;
+  }
+
+  follow.offRouteCount = 0;
+  const currentStep = match.step;
+  if (currentStep.id !== follow.currentStepId) {
+    follow.currentStepId = currentStep.id;
+    if (currentStep.announce?.onEnter && currentStep.spokenText && !follow.announcedStepIds.has(currentStep.id)) {
+      follow.announcedStepIds.add(currentStep.id);
+      speak(currentStep.spokenText);
+    }
+  }
+
+  const nextTurn = findNextTurnStep(steps, match.stepIndex);
+  const turnDistance = nextTurn?.turnPoint ? distanceBetweenCoordinates(location, nextTurn.turnPoint) : Infinity;
+  maybeAnnounceTurn(follow, nextTurn, turnDistance);
+
+  const nextText = nextTurn?.spokenText && Number.isFinite(turnDistance)
+    ? `下一转弯约 ${formatFollowMeters(turnDistance)}：${nextTurn.spokenText}`
+    : '暂时没有下一转弯提醒。';
+  updateFollowOutput([
+    `当前匹配：第 ${match.stepIndex + 1} 步，${currentStep.roadName || currentStep.targetRoadName || currentStep.kind}。`,
+    `离路线约 ${formatFollowMeters(match.distanceMeters)}，定位精度约 ${formatFollowMeters(accuracy)}。`,
+    `当前播报句：${currentStep.spokenText || '这一段只用于定位。'}`,
+    nextText
+  ].join('\n'));
+}
+
+function maybeAnnounceTurn(follow, turnStep, distanceMeters) {
+  if (!turnStep?.spokenText || !Number.isFinite(distanceMeters)) {
+    return;
+  }
+  const thresholds = Array.isArray(turnStep.announce?.beforeTurnMeters)
+    ? turnStep.announce.beforeTurnMeters
+    : [30, 15, 5];
+  for (const threshold of thresholds) {
+    const key = `${turnStep.id}:${threshold}`;
+    if (distanceMeters <= threshold && !follow.announcedTurnThresholds.has(key)) {
+      follow.announcedTurnThresholds.add(key);
+      speak(`前方约 ${threshold} 米，${turnStep.spokenText}`);
+      break;
+    }
+  }
+}
+
+function findNextTurnStep(steps, currentIndex) {
+  for (let index = Math.max(0, currentIndex); index < steps.length; index += 1) {
+    const step = steps[index];
+    if (step.kind === 'turn' && step.turnPoint) {
+      return step;
+    }
+  }
+  return null;
+}
+
+function matchLocationToFollowSteps(location, steps) {
+  const primary = steps.filter((step) => step.kind !== 'turn' && step.polyline);
+  const candidates = primary.length ? primary : steps.filter((step) => step.polyline);
+  let best = null;
+  for (const step of candidates) {
+    const stepIndex = steps.indexOf(step);
+    const projection = projectLocationToPolyline(location, step.polyline);
+    if (!projection) {
+      continue;
+    }
+    if (!best || projection.distanceMeters < best.distanceMeters) {
+      best = {
+        step,
+        stepIndex,
+        distanceMeters: projection.distanceMeters
+      };
+    }
+  }
+  return best;
+}
+
+function projectLocationToPolyline(location, polyline) {
+  const point = parseClientLngLat(location);
+  const points = String(polyline || '').split(';').map(parseClientLngLat).filter(Boolean);
+  if (!point || points.length < 2) {
+    return null;
+  }
+  let best = null;
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const projection = projectClientPointOnSegment(point, points[index], points[index + 1]);
+    if (!best || projection.distanceMeters < best.distanceMeters) {
+      best = projection;
+    }
+  }
+  return best;
+}
+
+function projectClientPointOnSegment(point, start, end) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const lengthSquared = dx * dx + dy * dy;
+  if (lengthSquared === 0) {
+    return {
+      distanceMeters: clientDistanceMeters(point, start)
+    };
+  }
+  const t = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared));
+  const projected = {
+    x: start.x + t * dx,
+    y: start.y + t * dy
+  };
+  return {
+    distanceMeters: clientDistanceMeters(point, projected)
+  };
+}
+
+function distanceBetweenCoordinates(left, right) {
+  const a = parseClientLngLat(left);
+  const b = parseClientLngLat(right);
+  return a && b ? clientDistanceMeters(a, b) : Infinity;
+}
+
+function parseClientLngLat(value) {
+  const coordinate = extractCoordinate(value);
+  if (!coordinate) {
+    return null;
+  }
+  const [lngText, latText] = coordinate.split(',');
+  const lng = Number(lngText);
+  const lat = Number(latText);
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+    return null;
+  }
+  const scale = Math.cos(lat * Math.PI / 180);
+  return {
+    lng,
+    lat,
+    x: lng * 111320 * scale,
+    y: lat * 110540
+  };
+}
+
+function clientDistanceMeters(a, b) {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function formatFollowMeters(value) {
+  const meters = Number(value || 0);
+  if (!Number.isFinite(meters)) {
+    return '未知距离';
+  }
+  return `${Math.round(meters)} 米`;
+}
+
+function updateFollowOutput(text) {
+  if (elements.followOutput) {
+    elements.followOutput.textContent = text;
+  }
 }
 
 async function getRealtimeMediaStream() {
@@ -441,6 +727,10 @@ async function startWebSocketRealtime() {
     audioProcessor: null,
     audioSource: null,
     audioSilenceGain: null,
+    localVadSpeaking: false,
+    localVadStartedAt: 0,
+    localVadLastVoiceAt: 0,
+    localVadAutoCommitTimer: null,
     isReady: false
   };
 
@@ -475,23 +765,61 @@ async function activateWebSocketStreams() {
     return;
   }
 
-  await realtime.audioContext.audioWorklet.addModule('/audio-worklet.js');
-  realtime.audioSource = realtime.audioContext.createMediaStreamSource(appState.stream);
-  realtime.audioProcessor = new AudioWorkletNode(realtime.audioContext, 'pcm-capture');
-  realtime.audioSilenceGain = realtime.audioContext.createGain();
-  realtime.audioSilenceGain.gain.value = 0;
-
-  realtime.audioProcessor.port.onmessage = (event) => {
-    const pcm = floatToPcm16(downsampleFloat32(event.data, realtime.audioContext.sampleRate, AUDIO_INPUT_RATE));
-    queueAudioChunk(pcm);
-  };
-
-  realtime.audioSource.connect(realtime.audioProcessor);
-  realtime.audioProcessor.connect(realtime.audioSilenceGain);
-  realtime.audioSilenceGain.connect(realtime.audioContext.destination);
-
+  await startManualAudioCapture(realtime);
   realtime.videoTimer = setInterval(sendVideoFrame, VIDEO_FRAME_INTERVAL_MS);
-  appendVisionLog('WebSocket Manual 已启动：音频和视频正在持续发送。静默放物体后，先点“只提交静默画面到上下文”；随后说“刚才看到了什么”，再点“提交并请求模型回答”。');
+  appendVisionLog('WebSocket Manual 已启动：真实麦克风环境声和低频视频帧正在持续发送。你可以按真实场景正常说话；页面会在检测到你说完后自动提交本轮音视频并请求模型回答。实验按钮只用于诊断。');
+}
+
+async function startManualAudioCapture(realtime) {
+  if (!appState.stream) {
+    throw new Error('没有可用的麦克风流。');
+  }
+
+  const audioContext = realtime.audioContext;
+  if (audioContext.state === 'suspended') {
+    await audioContext.resume();
+  }
+
+  const source = audioContext.createMediaStreamSource(appState.stream);
+  realtime.audioSource = source;
+
+  if (audioContext.audioWorklet) {
+    await audioContext.audioWorklet.addModule('/audio-worklet.js');
+    const processor = new AudioWorkletNode(audioContext, 'pcm-capture');
+    const silenceGain = audioContext.createGain();
+    silenceGain.gain.value = 0;
+    processor.port.onmessage = (event) => handleManualAudioFrame(event.data, audioContext.sampleRate);
+    source.connect(processor);
+    processor.connect(silenceGain);
+    silenceGain.connect(audioContext.destination);
+    realtime.audioProcessor = processor;
+    realtime.audioSilenceGain = silenceGain;
+    recordRealtimeDebug('manual.audio_capture.started', {
+      method: 'audioWorklet',
+      inputRate: audioContext.sampleRate,
+      outputRate: AUDIO_INPUT_RATE,
+      chunkBytes: AUDIO_SEND_BYTES
+    });
+    return;
+  }
+
+  const processor = audioContext.createScriptProcessor(4096, 1, 1);
+  const silenceGain = audioContext.createGain();
+  silenceGain.gain.value = 0;
+  processor.onaudioprocess = (event) => {
+    handleManualAudioFrame(event.inputBuffer.getChannelData(0), audioContext.sampleRate);
+  };
+  source.connect(processor);
+  processor.connect(silenceGain);
+  silenceGain.connect(audioContext.destination);
+  realtime.audioProcessor = processor;
+  realtime.audioSilenceGain = silenceGain;
+  recordRealtimeDebug('manual.audio_capture.started', {
+    method: 'scriptProcessor',
+    inputRate: audioContext.sampleRate,
+    outputRate: AUDIO_INPUT_RATE,
+    chunkBytes: AUDIO_SEND_BYTES
+  });
 }
 
 async function startWebRtcRealtime() {
@@ -590,7 +918,13 @@ function selectRecommendedRealtimeMode(config) {
 
 function resolveRealtimeMode(config) {
   const requested = elements.realtimeMode.value;
-  return requested;
+  if (requested === 'websocket' && (config?.webSocketConfigured || config?.serverApiKeyConfigured || readClientApiKey())) {
+    return 'websocket';
+  }
+  if (requested === 'webrtc' && (config?.webRtcConfigured || readClientWebRtcEndpoint())) {
+    return 'webrtc';
+  }
+  return config?.webRtcConfigured ? 'webrtc' : 'websocket';
 }
 
 function ensureRealtimeCanStart(mode, config) {
@@ -680,6 +1014,9 @@ function stopRealtime() {
   if (appState.assistantVadRestoreTimer) {
     clearTimeout(appState.assistantVadRestoreTimer);
     appState.assistantVadRestoreTimer = null;
+  }
+  if (realtime?.localVadAutoCommitTimer) {
+    clearTimeout(realtime.localVadAutoCommitTimer);
   }
   if (realtime?.audioProcessor) {
     realtime.audioProcessor.disconnect();
@@ -808,31 +1145,42 @@ function updateRealtimeSession(options = {}) {
   const profileKey = isManualWebSocket
     ? 'manual:null'
     : `${vadProfile.type}:${vadProfile.threshold}:${vadProfile.silence_duration_ms}`;
-  if (realtime.vadProfileKey === profileKey && options.reason !== 'context update') {
+  if (!options.force && realtime.vadProfileKey === profileKey && options.reason !== 'context update') {
     return;
   }
   realtime.vadProfileKey = profileKey;
 
+  const session = {
+    modalities: ['text', 'audio'],
+    voice: appState.realtime?.voice || appState.realtimeConfig?.voice || 'Tina',
+    input_audio_format: 'pcm',
+    output_audio_format: 'pcm',
+    turn_detection: isManualWebSocket ? null : vadProfile,
+    enable_search: true,
+    search_options: {
+      enable_source: true
+    },
+    instructions: buildRealtimeInstructions()
+  };
+
+  if (!isManualWebSocket) {
+    session.input_audio_transcription = {
+      model: 'qwen3-asr-flash-realtime'
+    };
+  }
+
   const event = {
     type: 'session.update',
-      session: {
-        modalities: ['text', 'audio'],
-      voice: appState.realtime?.voice || appState.realtimeConfig?.voice || 'Tina',
-      input_audio_format: 'pcm',
-      sample_rate: AUDIO_INPUT_RATE,
-      output_audio_format: 'pcm',
-      input_audio_transcription: {
-        model: 'qwen3-asr-flash-realtime'
-      },
-      turn_detection: isManualWebSocket ? null : vadProfile,
-      instructions: buildRealtimeInstructions()
-    }
+    session
   };
   sendRealtimeEvent(event);
   recordRealtimeDebug('client.session.update', {
     modalities: event.session.modalities,
     voice: event.session.voice,
+    inputAudioTranscription: event.session.input_audio_transcription || null,
     turnDetection: event.session.turn_detection,
+    enableSearch: event.session.enable_search,
+    searchOptions: event.session.search_options,
     manualMode: isManualWebSocket,
     reason: options.reason || '',
     target: elements.visionQuestion.value
@@ -933,36 +1281,127 @@ function commitRealtimeManualBuffer(options = {}) {
     appendVisionLog('Manual 提交失败：请先选择 WebSocket Manual 并启动实时慧眼。');
     return;
   }
-  if (!appState.sentFirstAudio) {
-    appendVisionLog('Manual 提交失败：音频缓冲区还没初始化，请等 1 秒后再试。');
+
+  flushPendingAudio();
+
+  const hadAudioForThisCommit = appState.sentFirstAudio || appState.pendingAudioBytes > 0;
+  if (!hadAudioForThisCommit) {
+    appendVisionLog('Manual 提交提醒：目前还没有检测到已发送的麦克风音频分片，可能会被百炼判定为空音频缓冲区。请确认麦克风权限和环境声。');
     return;
   }
 
-  sendRealtimeEvent({
-    type: 'input_audio_buffer.commit'
+  realtime.manualResponseInstruction = Boolean(options.requestResponse);
+  realtime.localVadSpeaking = false;
+  realtime.localVadStartedAt = 0;
+  realtime.localVadLastVoiceAt = 0;
+  if (realtime.localVadAutoCommitTimer) {
+    clearTimeout(realtime.localVadAutoCommitTimer);
+    realtime.localVadAutoCommitTimer = null;
+  }
+  updateRealtimeSession({
+    reason: options.requestResponse ? 'manual response request' : 'manual context commit',
+    force: true
   });
-  appState.sentFirstAudio = false;
+  sendRealtimeEvent({ type: 'input_audio_buffer.commit' });
   recordRealtimeDebug('client.manual.commit', {
     requestResponse: Boolean(options.requestResponse),
-    videoFramesDrawn: appState.videoFrameCount
+    trigger: options.trigger || 'button',
+    mode: 'audio_image_commit',
+    videoFramesDrawn: appState.videoFrameCount,
+    sentAudioThisTurn: hadAudioForThisCommit
   });
+  appState.sentFirstAudio = false;
 
   if (options.requestResponse) {
     appState.latestAssistantText = '';
     sendRealtimeEvent({
       type: 'response.create'
     });
-    appendVisionLog('已提交当前音频和图像缓冲区，并请求模型回答。');
+    appendVisionLog('已按 Manual 模式提交真实麦克风音频和图像缓冲区，并请求模型根据刚才画面回答。');
   } else {
-    appendVisionLog('已提交当前音频和图像缓冲区，但暂不请求回答。稍后说出问题后，再点“提交并请求模型回答”。');
+    appendVisionLog('已按 Manual 模式提交真实麦克风音频和图像缓冲区，暂不请求模型回答。');
   }
 }
 
-function queueAudioChunk(pcm) {
-  if (!appState.realtime?.isReady || appState.realtime.mode !== 'websocket') {
+function sendRealtimeTextItem(text) {
+  sendRealtimeEvent({
+    type: 'conversation.item.create',
+    item: {
+      type: 'message',
+      role: 'user',
+      content: [
+        {
+          type: 'input_text',
+          text
+        }
+      ]
+    }
+  });
+}
+
+function handleManualAudioFrame(frame, inputRate) {
+  if (!frame || frame.length === 0) {
+    return;
+  }
+  updateManualLocalVad(frame);
+  const downsampled = downsampleFloat32(frame, inputRate, AUDIO_INPUT_RATE);
+  const pcm = floatToPcm16(downsampled);
+  queueAudioChunk(pcm);
+}
+
+function updateManualLocalVad(frame) {
+  const realtime = appState.realtime;
+  if (!realtime || realtime.mode !== 'websocket' || !realtime.isReady) {
+    return;
+  }
+  if (appState.assistantMicMuteTimer) {
     return;
   }
 
+  let sumSquares = 0;
+  for (let i = 0; i < frame.length; i += 1) {
+    sumSquares += frame[i] * frame[i];
+  }
+  const rms = Math.sqrt(sumSquares / frame.length);
+  const now = Date.now();
+
+  if (!realtime.localVadSpeaking && rms >= MANUAL_LOCAL_VAD_START_RMS) {
+    realtime.localVadSpeaking = true;
+    realtime.localVadStartedAt = now;
+    realtime.localVadLastVoiceAt = now;
+    recordRealtimeDebug('manual.local_vad.speech_started', { rms });
+    return;
+  }
+
+  if (!realtime.localVadSpeaking) {
+    return;
+  }
+
+  if (rms >= MANUAL_LOCAL_VAD_END_RMS) {
+    realtime.localVadLastVoiceAt = now;
+    return;
+  }
+
+  const voiceDuration = now - realtime.localVadStartedAt;
+  const silenceDuration = now - realtime.localVadLastVoiceAt;
+  if (voiceDuration < MANUAL_LOCAL_VAD_MIN_AUDIO_MS || silenceDuration < MANUAL_LOCAL_VAD_END_MS) {
+    return;
+  }
+
+  if (realtime.localVadAutoCommitTimer) {
+    return;
+  }
+  realtime.localVadAutoCommitTimer = setTimeout(() => {
+    realtime.localVadAutoCommitTimer = null;
+    recordRealtimeDebug('manual.local_vad.speech_ended', {
+      voiceDuration,
+      silenceDuration
+    });
+    commitRealtimeManualBuffer({ requestResponse: true, trigger: 'local_vad' });
+  }, 0);
+}
+
+function queueAudioChunk(pcm) {
   appState.pendingAudio.push(pcm);
   appState.pendingAudioBytes += pcm.byteLength;
 
@@ -981,8 +1420,24 @@ function queueAudioChunk(pcm) {
   });
 }
 
+function flushPendingAudio() {
+  if (appState.pendingAudioBytes <= 0) {
+    return;
+  }
+
+  const merged = concatInt16(appState.pendingAudio, appState.pendingAudioBytes / 2);
+  appState.pendingAudio = [];
+  appState.pendingAudioBytes = 0;
+  appState.sentFirstAudio = true;
+
+  sendRealtimeEvent({
+    type: 'input_audio_buffer.append',
+    audio: uint8ToBase64(new Uint8Array(merged.buffer))
+  });
+}
+
 function sendVideoFrame() {
-  if (!appState.realtime?.isReady || !appState.sentFirstAudio || !appState.stream) {
+  if (!appState.realtime?.isReady || !appState.stream) {
     return;
   }
   if (elements.camera.readyState < 2) {
@@ -1159,22 +1614,22 @@ function createLowFpsVideoTrack(sourceTrack) {
 }
 
 function buildRealtimeInstructions() {
-  const routeState = appState.route ? JSON.stringify(appState.route, null, 2) : '尚未生成路线。';
-  return [
-    '你是给视障者张振宇使用的实时视频通话式导航助手。',
+  const hasRoute = Boolean(appState.route);
+  const routeState = hasRoute ? JSON.stringify(appState.route, null, 2) : '尚未生成路线。';
+  const baseInstructions = [
+    hasRoute
+      ? '你是给视障者张振宇使用的带导航任务的实时慧眼现场确认助手。'
+      : '你是给视障者张振宇使用的实时慧眼助手。',
     '你正在接收手机摄像头画面、麦克风语音和导航状态。',
-    '只要会话接通，你就必须始终处于观察工作状态。即使用户暂时不说话，也不要停止识别视频画面。',
-    '用户稍后问“刚才看到了什么”时，你必须尝试基于静默期间真实进入镜头的画面回答；如果你没有可靠看到，就说不确定。',
-    '必须像真人视频协助一样回答，但只能依据地图状态和画面中确实能看到或听到的信息。',
-    '必须明确区分“画面里确实看见”和“根据语音或导航状态推测”。不能把推测说成看见。',
-    '如果没有收到清晰画面、画面太晃、摄像头方向不对、或只听到语音没有看到对应物体，必须直接说：我现在看不清，不能确认。',
-    '不能编造门牌、站牌、入口、左右侧、过街次数。',
-    '如果看不清、地图和画面冲突、或者不能确认安全过街，必须直接说不确定，并给安全的下一步，例如原地慢慢扫视、退回路边、询问工作人员。',
-    '回答要短，适合语音播报。优先说行动，不要泛泛描述画面。',
-    '重点输出：是否看到目标、看到的目标类型、目标在前方/左前方/右前方、下一步动作、是否需要现场确认。',
-    `当前确认目标：${elements.visionQuestion.value}`,
-    `当前导航状态：${routeState}`
-  ].join('\n');
+    '回答要短，适合语音播报。',
+    '不要编造画面中没有看到或听到的信息。',
+    hasRoute
+      ? '当前已开启导航上下文，请优先结合当前路线任务回答用户问题。'
+      : '',
+    hasRoute ? `当前确认目标：${elements.visionQuestion.value}` : '',
+    hasRoute ? `当前导航状态：${routeState}` : ''
+  ];
+  return baseInstructions.filter(Boolean).join('\n');
 }
 
 function updateVisionOutput(text) {
@@ -1321,8 +1776,8 @@ function updateRealtimeConfigStatus(config) {
   }
   if (config.serverApiKeyConfigured || config.webSocketConfigured) {
     elements.realtimeConfigStatus.textContent = config.webRtcConfigured
-      ? '百炼后台已配置 Key 和 WebRTC Endpoint。默认可直接用 WebSocket Manual 测静默视觉记忆，也可切换 WebRTC 通话。'
-      : '百炼后台已配置 Key。默认可直接用 WebSocket Manual 测静默视觉记忆；WebRTC Endpoint 缺失不影响这个测试。';
+      ? '百炼后台已配置 Key 和 WebRTC Endpoint。大会演示版默认使用 WebRTC 通话；WebSocket Manual 暂停用于诊断。'
+      : '百炼后台已配置 Key，但 WebRTC Endpoint 缺失；大会演示实时慧眼不可用。';
     return;
   }
   if (!config.serverApiKeyConfigured && !config.webSocketConfigured) {
@@ -1386,7 +1841,9 @@ async function readApiResponse(response) {
 }
 
 function setPoiStatus(text) {
-  elements.poiResults.textContent = text;
+  if (elements.poiStatus) {
+    elements.poiStatus.textContent = text;
+  }
 }
 
 function extractCoordinate(text) {

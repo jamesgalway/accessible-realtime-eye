@@ -40,6 +40,17 @@
           <button id="search-destination" type="button">搜索终点</button>
         </div>
 
+        <div id="poi-status" class="ready-note" aria-live="assertive"></div>
+
+        <div
+          id="poi-results"
+          class="results"
+          role="region"
+          aria-live="assertive"
+          aria-label="地点搜索结果"
+          tabindex="-1"
+        ></div>
+
         <label for="mode">路线类型</label>
         <select id="mode">
           <option value="transit">公交加步行</option>
@@ -47,8 +58,6 @@
         </select>
 
         <button id="plan-route" class="primary" type="button">生成路线</button>
-
-        <div id="poi-results" class="results" aria-live="polite"></div>
       </section>
 
       <section class="panel" aria-labelledby="manual-route-title">
@@ -67,7 +76,12 @@
           注意：高德原始指令还不是最终“左边、右边、过几次马路”的死规则成品。这里先把地图事实和路线骨架锁住，再交给现场确认流程。
         </p>
         <button id="speak-route" type="button">朗读路线结果</button>
-        <pre id="route-output" class="output" tabindex="0" aria-live="polite">还没有生成路线。</pre>
+        <pre id="route-output" class="output" tabindex="0" aria-live="off">还没有生成路线。</pre>
+        <div class="button-row" aria-label="GPS 跟随播报">
+          <button id="start-follow" class="primary" type="button">开始 GPS 跟随播报</button>
+          <button id="stop-follow" type="button">停止 GPS 跟随播报</button>
+        </div>
+        <pre id="follow-output" class="output compact-output" tabindex="0" aria-live="polite">还没有开始 GPS 跟随。</pre>
       </section>
 
       <section class="panel camera-panel" aria-labelledby="camera-title">
@@ -78,8 +92,8 @@
 
         <label for="realtime-mode">实时接入方式</label>
         <select id="realtime-mode">
-          <option value="websocket">WebSocket Manual，测试静默视觉记忆</option>
-          <option value="webrtc">WebRTC 通话，需百炼白名单 Endpoint</option>
+          <option value="webrtc" selected>WebRTC 通话，演示推荐</option>
+          <option value="websocket">WebSocket Manual，静默上下文实验</option>
         </select>
 
         <p id="realtime-config-status" class="ready-note" aria-live="polite">
@@ -116,8 +130,8 @@
         <div class="button-row">
           <button id="start-realtime" class="primary" type="button">开始实时慧眼</button>
           <button id="send-context" type="button">发送当前导航上下文</button>
-          <button id="commit-silent-context" type="button">只提交静默画面到上下文</button>
-          <button id="commit-and-respond" type="button">提交并请求模型回答</button>
+          <button id="commit-silent-context" type="button">实验功能：提交静默画面</button>
+          <button id="commit-and-respond" type="button">实验功能：静默画面回答</button>
           <button id="check-silent-video" type="button">静默视频推送自检</button>
           <button id="stop-realtime" type="button">结束实时慧眼</button>
         </div>

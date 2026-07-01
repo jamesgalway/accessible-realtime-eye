@@ -234,6 +234,10 @@ h2 {
   font-family: "Microsoft YaHei UI", "Noto Sans Mono CJK SC", monospace;
 }
 
+.compact-output {
+  min-height: 5rem;
+}
+
 .camera-panel {
   position: relative;
 }
