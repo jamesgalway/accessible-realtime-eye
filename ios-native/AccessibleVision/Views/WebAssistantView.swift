@@ -6,12 +6,10 @@ struct WebAssistantView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Button(torch.isEnabled ? "关闭闪光灯" : "打开闪光灯") {
+                AccessibleTorchButton(isEnabled: torch.isEnabled) {
                     torch.toggle()
                 }
-                .buttonStyle(.borderedProminent)
-                .accessibilityLabel(torch.isEnabled ? "关闭闪光灯" : "打开闪光灯")
-                .accessibilityHint("固定按钮。双击后只在打开和关闭之间切换，不会由模型自动改变。")
+                .frame(width: 180, height: 44)
                 .accessibilitySortPriority(1000)
 
                 Spacer(minLength: 0)
@@ -19,7 +17,6 @@ struct WebAssistantView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
             .background(.bar)
-            .accessibilityElement(children: .contain)
 
             Divider()
 
