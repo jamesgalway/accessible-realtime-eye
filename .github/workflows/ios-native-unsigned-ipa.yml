@@ -1,5 +1,8 @@
 name: Build iPhone Test IPA
 
+permissions:
+  contents: write
+
 on:
   workflow_dispatch:
   push:
@@ -57,3 +60,15 @@ jobs:
           path: ios-native/AccessibleVision-unsigned.ipa
           if-no-files-found: error
           retention-days: 7
+
+      - name: Publish temporary unsigned IPA
+        working-directory: ios-native
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "ios-native-test-${GITHUB_RUN_NUMBER}" \
+            AccessibleVision-unsigned.ipa \
+            --target "${GITHUB_SHA}" \
+            --prerelease \
+            --title "iPhone native hardware test ${GITHUB_RUN_NUMBER}" \
+            --notes "Unsigned hardware test build. It must be signed for the test device before installation."
