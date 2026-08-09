@@ -4,8 +4,7 @@ import SwiftUI
 struct AccessibleVisionApp: App {
     var body: some Scene {
         WindowGroup {
-            HardwareFoundationView()
+            WebAssistantView()
         }
     }
 }
-
