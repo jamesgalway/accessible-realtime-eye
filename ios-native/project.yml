@@ -12,6 +12,7 @@ settings:
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
     GREEN_CLOUD_BASE_URL: "https://gemini-eye.zzypiano401402.xyz"
+    ALIYUN_BASE_URL: "https://121.40.253.186.sslip.io:8443"
 targets:
   AccessibleVision:
     type: application
@@ -30,6 +31,7 @@ targets:
         NSCameraUsageDescription: "实时慧眼需要使用后置摄像头识别环境和寻找物品。"
         NSMicrophoneUsageDescription: "实时慧眼需要使用麦克风接收你的任务和问题。"
         GreenCloudBaseURL: "$(GREEN_CLOUD_BASE_URL)"
+        AliyunBaseURL: "$(ALIYUN_BASE_URL)"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.zzypiano.accessiblevision.dev

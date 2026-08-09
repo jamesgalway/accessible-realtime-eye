@@ -4,6 +4,7 @@ struct WebAssistantView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var camera = NativeCameraService()
     @StateObject private var torch = NativeTorchController()
+    @State private var selectedBackend: AssistantBackend = .greenCloud
 
     var body: some View {
         VStack(spacing: 0) {
@@ -20,12 +21,23 @@ struct WebAssistantView: View {
             .padding(.vertical, 8)
             .background(.bar)
 
+            HStack(spacing: 12) {
+                backendButton(.greenCloud)
+                backendButton(.aliyun)
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+            .background(.bar)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("选择识别模型")
+
             Divider()
 
             GreenCloudWebView(
-                url: AppConfiguration.greenCloudBaseURL,
+                url: selectedBackend.baseURL,
                 camera: camera
             )
+                .id(selectedBackend.rawValue)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .alert(
@@ -54,5 +66,18 @@ struct WebAssistantView: View {
                 camera.stop()
             }
         }
+    }
+
+    private func backendButton(_ backend: AssistantBackend) -> some View {
+        let isSelected = selectedBackend == backend
+        return Button(backend.title) {
+            guard selectedBackend != backend else { return }
+            selectedBackend = backend
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(isSelected ? .accentColor : .secondary)
+        .accessibilityLabel(backend.title)
+        .accessibilityValue(isSelected ? "当前入口" : "未选择")
+        .accessibilityHint(isSelected ? "当前正在使用" : "双击切换到这个入口；旧任务会结束")
     }
 }
