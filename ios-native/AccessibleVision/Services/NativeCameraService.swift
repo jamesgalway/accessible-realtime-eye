@@ -5,6 +5,28 @@ import Foundation
 import ImageIO
 import UIKit
 
+struct NativeVisionFramePacket: Encodable {
+    let frameId: Int
+    let capturedAtMs: Int64
+    let imageDataUrl: String
+    let width: Int
+    let height: Int
+    let lidarAvailable: Bool
+    let depthGridWidth: Int
+    let depthGridHeight: Int
+    let depthGrid: [Float?]
+    let cameraIntrinsics: CameraIntrinsics
+
+    struct CameraIntrinsics: Encodable {
+        let fx: Float
+        let fy: Float
+        let cx: Float
+        let cy: Float
+        let sourceWidth: Float
+        let sourceHeight: Float
+    }
+}
+
 final class NativeCameraService: NSObject, ObservableObject, ARSessionDelegate {
     let session = ARSession()
 
@@ -14,11 +36,21 @@ final class NativeCameraService: NSObject, ObservableObject, ARSessionDelegate {
     @Published private(set) var centerDistanceMeters: Float?
     @Published private(set) var statusText = "尚未启动摄像头。"
 
+    var onFramePacket: ((NativeVisionFramePacket) -> Void)?
+
     private let frameQueue = DispatchQueue(label: "com.zzypiano.accessiblevision.frames")
     private let frameLock = NSLock()
     private var latestFrame: ARFrame?
-    private var viewportSize: CGSize = .zero
+    private var viewportSize = CGSize(width: 512, height: 910)
     private let ciContext = CIContext(options: [.cacheIntermediates: false])
+    private var lastPacketTime: TimeInterval = 0
+    private var nextFrameId = 1
+
+    private static let packetInterval: TimeInterval = 1.0 / 3.0
+    private static let outputWidth: CGFloat = 512
+    private static let outputAspectRatio: CGFloat = 9.0 / 16.0
+    private static let depthGridWidth = 24
+    private static let depthGridHeight = 42
 
     override init() {
         super.init()
@@ -27,6 +59,7 @@ final class NativeCameraService: NSObject, ObservableObject, ARSessionDelegate {
     }
 
     func start() {
+        guard !isRunning else { return }
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:
             startAuthorizedSession()
@@ -52,6 +85,7 @@ final class NativeCameraService: NSObject, ObservableObject, ARSessionDelegate {
         latestFrame = nil
         frameLock.unlock()
         isRunning = false
+        lidarAvailable = false
         centerDistanceMeters = nil
         statusText = "摄像头已停止。"
     }
@@ -67,21 +101,12 @@ final class NativeCameraService: NSObject, ObservableObject, ARSessionDelegate {
         setTorch(enabled: !torchEnabled)
     }
 
-    func jpegData(maxDimension: CGFloat = 512, quality: CGFloat = 0.55) -> Data? {
+    func jpegData(maxWidth: CGFloat = 512, quality: CGFloat = 0.60) -> Data? {
         frameLock.lock()
         let frame = latestFrame
         frameLock.unlock()
         guard let frame else { return nil }
-
-        let source = CIImage(cvPixelBuffer: frame.capturedImage)
-            .oriented(.right)
-        let extent = source.extent
-        let scale = min(1, maxDimension / max(extent.width, extent.height))
-        let resized = source.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-        guard let cgImage = ciContext.createCGImage(resized, from: resized.extent) else {
-            return nil
-        }
-        return UIImage(cgImage: cgImage).jpegData(compressionQuality: quality)
+        return makePortraitJPEG(from: frame, maxWidth: maxWidth, quality: quality)?.data
     }
 
     func depthMeters(atPortraitNormalized point: CGPoint) -> Float? {
@@ -89,29 +114,8 @@ final class NativeCameraService: NSObject, ObservableObject, ARSessionDelegate {
         let frame = latestFrame
         let viewSize = viewportSize
         frameLock.unlock()
-        guard
-            let frame,
-            viewSize.width > 0,
-            viewSize.height > 0,
-            let depth = frame.smoothedSceneDepth ?? frame.sceneDepth
-        else {
-            return nil
-        }
-
-        let viewPoint = CGPoint(
-            x: min(max(point.x, 0), 1),
-            y: min(max(point.y, 0), 1)
-        )
-        let imageTransform = frame.displayTransform(
-            for: .portrait,
-            viewportSize: viewSize
-        ).inverted()
-        let imagePoint = viewPoint.applying(imageTransform)
-        return Self.medianDepth(
-            depthMap: depth.depthMap,
-            confidenceMap: depth.confidenceMap,
-            normalizedImagePoint: imagePoint
-        )
+        guard let frame else { return nil }
+        return depthMeters(in: frame, atPortraitNormalized: point, viewportSize: viewSize)
     }
 
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
@@ -120,17 +124,28 @@ final class NativeCameraService: NSObject, ObservableObject, ARSessionDelegate {
         frameLock.unlock()
 
         let hasDepth = frame.smoothedSceneDepth != nil || frame.sceneDepth != nil
-        let centerDepth = depthMeters(atPortraitNormalized: CGPoint(x: 0.5, y: 0.5))
+        let packetViewport = Self.packetViewportSize
+        let centerDepth = depthMeters(
+            in: frame,
+            atPortraitNormalized: CGPoint(x: 0.5, y: 0.5),
+            viewportSize: packetViewport
+        )
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.lidarAvailable = hasDepth
             self.centerDistanceMeters = centerDepth
             if self.isRunning {
                 self.statusText = hasDepth
-                    ? "后置摄像头和 LiDAR 正在运行。"
-                    : "后置摄像头正在运行；当前设备没有提供 LiDAR 深度。"
+                    ? "后置主摄像头和 LiDAR 正在运行。"
+                    : "后置主摄像头正在运行；当前设备没有提供 LiDAR 深度。"
             }
         }
+
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - lastPacketTime >= Self.packetInterval else { return }
+        lastPacketTime = now
+        guard let packet = makeFramePacket(from: frame, hasDepth: hasDepth) else { return }
+        onFramePacket?(packet)
     }
 
     private func startAuthorizedSession() {
@@ -140,6 +155,9 @@ final class NativeCameraService: NSObject, ObservableObject, ARSessionDelegate {
         }
         let configuration = ARWorldTrackingConfiguration()
         configuration.worldAlignment = .gravity
+        configuration.isAutoFocusEnabled = true
+        configuration.environmentTexturing = .none
+        configuration.planeDetection = []
         if ARWorldTrackingConfiguration.supportsFrameSemantics(.smoothedSceneDepth) {
             configuration.frameSemantics.insert(.smoothedSceneDepth)
         } else if ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) {
@@ -150,8 +168,8 @@ final class NativeCameraService: NSObject, ObservableObject, ARSessionDelegate {
             || configuration.frameSemantics.contains(.sceneDepth)
         isRunning = true
         statusText = lidarAvailable
-            ? "后置摄像头和 LiDAR 正在启动。"
-            : "后置摄像头正在启动；这台设备不支持 LiDAR。"
+            ? "后置主摄像头和 LiDAR 正在启动。"
+            : "后置主摄像头正在启动；这台设备不支持 LiDAR。"
     }
 
     private func setTorch(enabled: Bool) {
@@ -179,50 +197,74 @@ final class NativeCameraService: NSObject, ObservableObject, ARSessionDelegate {
         }
     }
 
-    private static func medianDepth(
-        depthMap: CVPixelBuffer,
-        confidenceMap: CVPixelBuffer?,
-        normalizedImagePoint: CGPoint
-    ) -> Float? {
-        CVPixelBufferLockBaseAddress(depthMap, .readOnly)
-        if let confidenceMap {
-            CVPixelBufferLockBaseAddress(confidenceMap, .readOnly)
+    private func makeFramePacket(from frame: ARFrame, hasDepth: Bool) -> NativeVisionFramePacket? {
+        guard let jpeg = makePortraitJPEG(from: frame, maxWidth: Self.outputWidth, quality: 0.60) else {
+            return nil
         }
-        defer {
-            CVPixelBufferUnlockBaseAddress(depthMap, .readOnly)
-            if let confidenceMap {
-                CVPixelBufferUnlockBaseAddress(confidenceMap, .readOnly)
-            }
-        }
+        let frameId = nextFrameId
+        nextFrameId += 1
+        let depthGrid = makeDepthGrid(
+            from: frame,
+            columns: Self.depthGridWidth,
+            rows: Self.depthGridHeight,
+            viewportSize: CGSize(width: jpeg.width, height: jpeg.height)
+        )
+        let intrinsics = frame.camera.intrinsics
+        let resolution = frame.camera.imageResolution
+        return NativeVisionFramePacket(
+            frameId: frameId,
+            capturedAtMs: Int64((Date().timeIntervalSince1970 * 1000).rounded()),
+            imageDataUrl: "data:image/jpeg;base64,\(jpeg.data.base64EncodedString())",
+            width: jpeg.width,
+            height: jpeg.height,
+            lidarAvailable: hasDepth && depthGrid.contains(where: { $0 != nil }),
+            depthGridWidth: Self.depthGridWidth,
+            depthGridHeight: Self.depthGridHeight,
+            depthGrid: depthGrid,
+            cameraIntrinsics: .init(
+                fx: intrinsics.columns.0.x,
+                fy: intrinsics.columns.1.y,
+                cx: intrinsics.columns.2.x,
+                cy: intrinsics.columns.2.y,
+                sourceWidth: Float(resolution.width),
+                sourceHeight: Float(resolution.height)
+            )
+        )
+    }
 
-        guard let depthBase = CVPixelBufferGetBaseAddress(depthMap) else { return nil }
-        let width = CVPixelBufferGetWidth(depthMap)
-        let height = CVPixelBufferGetHeight(depthMap)
-        let depthStride = CVPixelBufferGetBytesPerRow(depthMap) / MemoryLayout<Float32>.stride
-        let depthValues = depthBase.assumingMemoryBound(to: Float32.self)
-        let confidenceBase = confidenceMap.flatMap(CVPixelBufferGetBaseAddress)
-        let confidenceStride = confidenceMap.map(CVPixelBufferGetBytesPerRow) ?? 0
-
-        let centerX = Int((min(max(normalizedImagePoint.x, 0), 1) * CGFloat(width - 1)).rounded())
-        let centerY = Int((min(max(normalizedImagePoint.y, 0), 1) * CGFloat(height - 1)).rounded())
-        var samples: [Float] = []
-        for y in max(0, centerY - 2)...min(height - 1, centerY + 2) {
-            for x in max(0, centerX - 2)...min(width - 1, centerX + 2) {
-                if let confidenceBase {
-                    let confidence = confidenceBase
-                        .advanced(by: y * confidenceStride + x)
-                        .assumingMemoryBound(to: UInt8.self)
-                        .pointee
-                    if confidence < UInt8(ARConfidenceLevel.medium.rawValue) { continue }
-                }
-                let value = depthValues[y * depthStride + x]
-                if value.isFinite, value > 0.05, value < 20 {
-                    samples.append(value)
-                }
-            }
+    private func makePortraitJPEG(
+        from frame: ARFrame,
+        maxWidth: CGFloat,
+        quality: CGFloat
+    ) -> (data: Data, width: Int, height: Int)? {
+        let portrait = CIImage(cvPixelBuffer: frame.capturedImage).oriented(.right)
+        let targetCropWidth = min(portrait.extent.width, portrait.extent.height * Self.outputAspectRatio)
+        let cropRect = CGRect(
+            x: portrait.extent.midX - targetCropWidth / 2,
+            y: portrait.extent.minY,
+            width: targetCropWidth,
+            height: portrait.extent.height
+        ).integral
+        let cropped = portrait.cropped(to: cropRect)
+        let scale = min(1, maxWidth / max(cropped.extent.width, 1))
+        let resized = cropped
+            .transformed(by: CGAffineTransform(translationX: -cropped.extent.minX, y: -cropped.extent.minY))
+            .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        guard let cgImage = ciContext.createCGImage(resized, from: resized.extent) else {
+            return nil
         }
-        guard !samples.isEmpty else { return nil }
-        samples.sort()
-        return samples[samples.count / 2]
+        guard let data = UIImage(cgImage…5600 tokens truncated…ice.lockForConfiguration()
+            defer { device.unlockForConfiguration() }
+            if enabled, device.isTorchModeSupported(.on) {
+                try device.setTorchModeOn(level: 1)
+            } else {
+                device.torchMode = .off
+            }
+            isEnabled = enabled && device.torchMode == .on
+            errorMessage = ""
+        } catch {
+            isEnabled = false
+            errorMessage = "闪光灯切换失败。"
+        }
     }
 }

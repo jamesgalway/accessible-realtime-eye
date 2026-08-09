@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct WebAssistantView: View {
+    @Environment(\.scenePhase) private var scenePhase
+    @StateObject private var camera = NativeCameraService()
     @StateObject private var torch = NativeTorchController()
 
     var body: some View {
@@ -20,7 +22,10 @@ struct WebAssistantView: View {
 
             Divider()
 
-            GreenCloudWebView(url: AppConfiguration.greenCloudBaseURL)
+            GreenCloudWebView(
+                url: AppConfiguration.greenCloudBaseURL,
+                camera: camera
+            )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .alert(
@@ -36,6 +41,18 @@ struct WebAssistantView: View {
         }
         .onDisappear {
             torch.turnOff()
+            camera.stop()
+        }
+        .onAppear {
+            camera.start()
+        }
+        .onChange(of: scenePhase) { newPhase in
+            if newPhase == .active {
+                camera.start()
+            } else {
+                torch.turnOff()
+                camera.stop()
+            }
         }
     }
 }

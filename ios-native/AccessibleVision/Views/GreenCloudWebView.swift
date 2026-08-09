@@ -4,9 +4,10 @@ import WebKit
 
 struct GreenCloudWebView: UIViewRepresentable {
     let url: URL
+    let camera: NativeCameraService
 
     func makeCoordinator() -> Coordinator {
-        Coordinator()
+        Coordinator(camera: camera)
     }
 
     func makeUIView(context: Context) -> WKWebView {
@@ -15,8 +16,15 @@ struct GreenCloudWebView: UIViewRepresentable {
         configuration.mediaTypesRequiringUserActionForPlayback = []
         configuration.websiteDataStore = .default()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+        configuration.userContentController.addUserScript(WKUserScript(
+            source: NativeVisionBridgeScript.source,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        ))
+        configuration.userContentController.add(context.coordinator, name: "nativeVision")
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
+        context.coordinator.attach(to: webView)
         webView.uiDelegate = context.coordinator
         webView.navigationDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = false
@@ -25,9 +33,41 @@ struct GreenCloudWebView: UIViewRepresentable {
         return webView
     }
 
-    func updateUIView(_ webView: WKWebView, context: Context) {}
+    func updateUIView(_ webView: WKWebView, context: Context) {
+        context.coordinator.attach(to: webView)
+    }
 
-    final class Coordinator: NSObject, WKUIDelegate, WKNavigationDelegate {
+    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+        coordinator.detach()
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "nativeVision")
+    }
+
+    final class Coordinator: NSObject, WKUIDelegate, WKNavigationDelegate, WKScriptMessageHandler {
+        private let camera: NativeCameraService
+        private weak var webView: WKWebView?
+        private var webReady = false
+        private var latestPacket: NativeVisionFramePacket?
+
+        init(camera: NativeCameraService) {
+            self.camera = camera
+        }
+
+        func attach(to webView: WKWebView) {
+            self.webView = webView
+            camera.onFramePacket = { [weak self] packet in
+                DispatchQueue.main.async {
+                    self?.receive(packet)
+                }
+            }
+        }
+
+        func detach() {
+            camera.onFramePacket = nil
+            webView = nil
+            webReady = false
+            latestPacket = nil
+        }
+
         func webView(
             _ webView: WKWebView,
             requestMediaCapturePermissionFor origin: WKSecurityOrigin,
@@ -38,8 +78,47 @@ struct GreenCloudWebView: UIViewRepresentable {
             decisionHandler(.grant)
         }
 
+        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            webReady = false
+        }
+
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            webView.evaluateJavaScript("window.__ACCESSIBLE_VISION_NATIVE_IOS__ = true;")
+            webReady = true
+            webView.evaluateJavaScript("""
+                window.__ACCESSIBLE_VISION_NATIVE_IOS__ = true;
+                window.__accessibleVisionEnableRuntimeHooks?.();
+                """)
+            if let latestPacket {
+                deliver(latestPacket, to: webView)
+            }
+        }
+
+        func userContentController(
+            _ userContentController: WKUserContentController,
+            didReceive message: WKScriptMessage
+        ) {
+            guard message.name == "nativeVision" else { return }
+            let body = message.body as? [String: Any]
+            let type = String(body?["type"] as? String ?? "")
+            if type == "fallbackWebCamera" {
+                camera.stop()
+            }
+        }
+
+        private func receive(_ packet: NativeVisionFramePacket) {
+            latestPacket = packet
+            guard webReady, let webView else { return }
+            deliver(packet, to: webView)
+        }
+
+        private func deliver(_ packet: NativeVisionFramePacket, to webView: WKWebView) {
+            guard
+                let data = try? JSONEncoder().encode(packet),
+                let json = String(data: data, encoding: .utf8)
+            else {
+                return
+            }
+            webView.evaluateJavaScript("window.__accessibleVisionReceiveFrame?.(\(json));")
         }
     }
 }
