@@ -115,7 +115,7 @@ final class NativeCameraService: NSObject, ObservableObject, ARSessionDelegate {
         let viewSize = viewportSize
         frameLock.unlock()
         guard let frame else { return nil }
-        return depthMeters(in: frame, atPortraitNormalized: point, viewportSize: viewSize)
+        return depthMeters(frame: frame, atPortraitNormalized: point, viewportSize: viewSize)
     }
 
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
@@ -126,7 +126,7 @@ final class NativeCameraService: NSObject, ObservableObject, ARSessionDelegate {
         let hasDepth = frame.smoothedSceneDepth != nil || frame.sceneDepth != nil
         let packetViewport = Self.packetViewportSize
         let centerDepth = depthMeters(
-            in: frame,
+            frame: frame,
             atPortraitNormalized: CGPoint(x: 0.5, y: 0.5),
             viewportSize: packetViewport
         )
@@ -246,7 +246,7 @@ final class NativeCameraService: NSObject, ObservableObject, ARSessionDelegate {
             height: portrait.extent.height
         ).integral
         let cropped = portrait.cropped(to: cropRect)
-        let scale = min(1, maxWidth / max(croppe…5700 tokens truncated…ice.lockForConfiguration()
+        let scale = Swift.min(CGFloat(1), …5709 tokens truncated…ice.lockForConfiguration()
             defer { device.unlockForConfiguration() }
             if enabled, device.isTorchModeSupported(.on) {
                 try device.setTorchModeOn(level: 1)
