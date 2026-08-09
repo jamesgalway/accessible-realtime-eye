@@ -246,14 +246,7 @@ final class NativeCameraService: NSObject, ObservableObject, ARSessionDelegate {
             height: portrait.extent.height
         ).integral
         let cropped = portrait.cropped(to: cropRect)
-        let scale = min(1, maxWidth / max(cropped.extent.width, 1))
-        let resized = cropped
-            .transformed(by: CGAffineTransform(translationX: -cropped.extent.minX, y: -cropped.extent.minY))
-            .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-        guard let cgImage = ciContext.createCGImage(resized, from: resized.extent) else {
-            return nil
-        }
-        guard let data = UIImage(cgImage…5600 tokens truncated…ice.lockForConfiguration()
+        let scale = min(1, maxWidth / max(croppe…5700 tokens truncated…ice.lockForConfiguration()
             defer { device.unlockForConfiguration() }
             if enabled, device.isTorchModeSupported(.on) {
                 try device.setTorchModeOn(level: 1)
