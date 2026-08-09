@@ -46,7 +46,7 @@ jobs:
         working-directory: ios-native
         run: |
           set -euo pipefail
-          app="build/Build/Products/Debug-iphoneos/实时慧眼.app"
+          app="build/Build/Products/Debug-iphoneos/AccessibleVision.app"
           test -d "$app"
           rm -rf Payload AccessibleVision-unsigned.ipa
           mkdir Payload

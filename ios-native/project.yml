@@ -8,7 +8,7 @@ settings:
     SWIFT_VERSION: "5.9"
     DEVELOPMENT_TEAM: ""
     CODE_SIGN_STYLE: Automatic
-    PRODUCT_NAME: "实时慧眼"
+    PRODUCT_NAME: AccessibleVision
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
     GREEN_CLOUD_BASE_URL: "https://gemini-eye.zzypiano401402.xyz"
@@ -41,4 +41,3 @@ targets:
       - path: AccessibleVisionTests
     dependencies:
       - target: AccessibleVision
-
