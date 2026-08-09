@@ -2,6 +2,12 @@ name: Build iPhone Test IPA
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - ios-native-hardware-foundation
+    paths:
+      - "ios-native/**"
+      - ".github/workflows/ios-native-unsigned-ipa.yml"
 
 jobs:
   build:
@@ -51,4 +57,3 @@ jobs:
           path: ios-native/AccessibleVision-unsigned.ipa
           if-no-files-found: error
           retention-days: 7
-
