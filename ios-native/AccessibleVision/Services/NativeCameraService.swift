@@ -246,7 +246,7 @@ final class NativeCameraService: NSObject, ObservableObject, ARSessionDelegate {
             height: portrait.extent.height
         ).integral
         let cropped = portrait.cropped(to: cropRect)
-        let safeCropWidth = cropped.extent…5730 tokens truncated…ice.lockForConfiguration()
+        var safeCropWidth = cropped.extent…5745 tokens truncated…ice.lockForConfiguration()
             defer { device.unlockForConfiguration() }
             if enabled, device.isTorchModeSupported(.on) {
                 try device.setTorchModeOn(level: 1)
