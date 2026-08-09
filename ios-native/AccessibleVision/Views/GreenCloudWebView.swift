@@ -21,7 +21,6 @@ struct GreenCloudWebView: UIViewRepresentable {
         webView.navigationDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = false
         webView.scrollView.contentInsetAdjustmentBehavior = .never
-        webView.accessibilityLabel = "实时慧眼"
         webView.load(URLRequest(url: url, cachePolicy: .reloadRevalidatingCacheData))
         return webView
     }
@@ -44,4 +43,3 @@ struct GreenCloudWebView: UIViewRepresentable {
         }
     }
 }
-
