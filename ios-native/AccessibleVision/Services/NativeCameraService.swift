@@ -246,18 +246,148 @@ final class NativeCameraService: NSObject, ObservableObject, ARSessionDelegate {
             height: portrait.extent.height
         ).integral
         let cropped = portrait.cropped(to: cropRect)
-        var safeCropWidth = cropped.extent…5745 tokens truncated…ice.lockForConfiguration()
-            defer { device.unlockForConfiguration() }
-            if enabled, device.isTorchModeSupported(.on) {
-                try device.setTorchModeOn(level: 1)
-            } else {
-                device.torchMode = .off
-            }
-            isEnabled = enabled && device.torchMode == .on
-            errorMessage = ""
-        } catch {
-            isEnabled = false
-            errorMessage = "闪光灯切换失败。"
+        var safeCropWidth = cropped.extent.width
+        if safeCropWidth < CGFloat(1) {
+            safeCropWidth = CGFloat(1)
         }
+        var scale = maxWidth / safeCropWidth
+        if scale > 1 {
+            scale = 1
+        }
+        let resized = cropped
+            .transformed(by: CGAffineTransform(translationX: -cropped.extent.minX, y: -cropped.extent.minY))
+            .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        guard let cgImage = ciContext.createCGImage(resized, from: resized.extent) else {
+            return nil
+        }
+        guard let data = UIImage(cgImage: cgImage).jpegData(compressionQuality: quality) else {
+            return nil
+        }
+        return (data, cgImage.width, cgImage.height)
+    }
+
+    private func depthMeters(
+        frame: ARFrame,
+        atPortraitNormalized point: CGPoint,
+        viewportSize: CGSize
+    ) -> Float? {
+        guard
+            viewportSize.width > 0,
+            viewportSize.height > 0,
+            let depth = frame.smoothedSceneDepth ?? frame.sceneDepth
+        else {
+            return nil
+        }
+        let viewPoint = CGPoint(
+            x: min(max(point.x, 0), 1),
+            y: min(max(point.y, 0), 1)
+        )
+        let imageTransform = frame.displayTransform(
+            for: .portrait,
+            viewportSize: viewportSize
+        ).inverted()
+        let imagePoint = viewPoint.applying(imageTransform)
+        return Self.withLockedDepth(depth) { locked in
+            Self.medianDepth(locked: locked, normalizedImagePoint: imagePoint)
+        }
+    }
+
+    private func makeDepthGrid(
+        from frame: ARFrame,
+        columns: Int,
+        rows: Int,
+        viewportSize: CGSize
+    ) -> [Float?] {
+        guard let depth = frame.smoothedSceneDepth ?? frame.sceneDepth else {
+            return Array(repeating: nil, count: columns * rows)
+        }
+        let imageTransform = frame.displayTransform(
+            for: .portrait,
+            viewportSize: viewportSize
+        ).inverted()
+        return Self.withLockedDepth(depth) { locked in
+            var values: [Float?] = []
+            values.reserveCapacity(columns * rows)
+            for row in 0..<rows {
+                for column in 0..<columns {
+                    let viewPoint = CGPoint(
+                        x: (CGFloat(column) + 0.5) / CGFloat(columns),
+                        y: (CGFloat(row) + 0.5) / CGFloat(rows)
+                    )
+                    values.append(Self.medianDepth(
+                        locked: locked,
+                        normalizedImagePoint: viewPoint.applying(imageTransform)
+                    ))
+                }
+            }
+            return values
+        }
+    }
+
+    private struct LockedDepth {
+        let width: Int
+        let height: Int
+        let depthStride: Int
+        let depthValues: UnsafeMutablePointer<Float32>
+        let confidenceBase: UnsafeMutableRawPointer?
+        let confidenceStride: Int
+    }
+
+    private static func withLockedDepth<T>(
+        _ depth: ARDepthData,
+        body: (LockedDepth) -> T
+    ) -> T {
+        let depthMap = depth.depthMap
+        let confidenceMap = depth.confidenceMap
+        CVPixelBufferLockBaseAddress(depthMap, .readOnly)
+        if let confidenceMap {
+            CVPixelBufferLockBaseAddress(confidenceMap, .readOnly)
+        }
+        defer {
+            CVPixelBufferUnlockBaseAddress(depthMap, .readOnly)
+            if let confidenceMap {
+                CVPixelBufferUnlockBaseAddress(confidenceMap, .readOnly)
+            }
+        }
+        let locked = LockedDepth(
+            width: CVPixelBufferGetWidth(depthMap),
+            height: CVPixelBufferGetHeight(depthMap),
+            depthStride: CVPixelBufferGetBytesPerRow(depthMap) / MemoryLayout<Float32>.stride,
+            depthValues: CVPixelBufferGetBaseAddress(depthMap)!.assumingMemoryBound(to: Float32.self),
+            confidenceBase: confidenceMap.flatMap(CVPixelBufferGetBaseAddress),
+            confidenceStride: confidenceMap.map(CVPixelBufferGetBytesPerRow) ?? 0
+        )
+        return body(locked)
+    }
+
+    private static func medianDepth(
+        locked: LockedDepth,
+        normalizedImagePoint: CGPoint
+    ) -> Float? {
+        let centerX = Int((min(max(normalizedImagePoint.x, 0), 1) * CGFloat(locked.width - 1)).rounded())
+        let centerY = Int((min(max(normalizedImagePoint.y, 0), 1) * CGFloat(locked.height - 1)).rounded())
+        var samples: [Float] = []
+        for y in max(0, centerY - 2)...min(locked.height - 1, centerY + 2) {
+            for x in max(0, centerX - 2)...min(locked.width - 1, centerX + 2) {
+                if let confidenceBase = locked.confidenceBase {
+                    let confidence = confidenceBase
+                        .advanced(by: y * locked.confidenceStride + x)
+                        .assumingMemoryBound(to: UInt8.self)
+                        .pointee
+                    if confidence < UInt8(ARConfidenceLevel.medium.rawValue) { continue }
+                }
+                let value = locked.depthValues[y * locked.depthStride + x]
+                if value.isFinite, value > 0.05, value < 8 {
+                    samples.append(value)
+                }
+            }
+        }
+        guard samples.count >= 3 else { return nil }
+        samples.sort()
+        return samples[samples.count / 2]
+    }
+
+    private static var packetViewportSize: CGSize {
+        CGSize(width: outputWidth, height: outputWidth / outputAspectRatio)
     }
 }
