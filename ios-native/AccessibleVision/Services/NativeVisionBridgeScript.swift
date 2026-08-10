@@ -298,6 +298,11 @@ enum NativeVisionBridgeScript {
       };
 
       const originalFetch = window.fetch.bind(window);
+      const findPaths = new Set([
+        '/api/find-object-check',
+        '/api/find-object-live-check',
+        '/api/find-object-direct-finalize'
+      ]);
       window.fetch = async (input, init = {}) => {
         const url = typeof input === 'string' ? input : String(input?.url || '');
         const path = (() => {
@@ -330,14 +335,41 @@ enum NativeVisionBridgeScript {
               modelLatencyMs: 0
             });
           }
+          if (typeof window.logClientEvent === 'function') {
+            window.logClientEvent('native_lidar.continuous_depth', {
+              available: false,
+              reason: 'native_lidar_unavailable'
+            });
+          }
+          return jsonResponse({
+            ok: true,
+            available: false,
+            approximate: true,
+            unit: 'meter',
+            source: 'apple_lidar',
+            reason: 'native_lidar_unavailable',
+            latencyMs: 0,
+            modelLatencyMs: 0
+          });
         }
 
-        const response = await originalFetch(input, init);
-        const findPaths = new Set([
-          '/api/find-object-check',
-          '/api/find-object-live-check',
-          '/api/find-object-direct-finalize'
-        ]);
+        let requestInit = init;
+        if (
+          findPaths.has(path)
+          && body
+          && String(window.__ACCESSIBLE_VISION_BACKEND__ || '') === 'greenCloud'
+        ) {
+          body = {
+            ...body,
+            nativeFindDepthPolicy: 'apple_lidar_only_v1'
+          };
+          requestInit = {
+            ...init,
+            body: JSON.stringify(body)
+          };
+        }
+
+        const response = await originalFetch(input, requestInit);
         if (!findPaths.has(path) || !response.ok || !body) return response;
         try {
           const result = await response.clone().json();

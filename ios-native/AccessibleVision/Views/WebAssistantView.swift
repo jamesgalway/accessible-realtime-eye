@@ -35,6 +35,7 @@ struct WebAssistantView: View {
 
             GreenCloudWebView(
                 url: selectedBackend.baseURL,
+                backend: selectedBackend,
                 camera: camera
             )
                 .id(selectedBackend.rawValue)

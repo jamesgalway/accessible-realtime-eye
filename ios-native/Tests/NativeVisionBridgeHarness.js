@@ -52,6 +52,7 @@ class MockImage {
 
 global.window = global;
 global.location = { href: 'https://gemini-eye.zzypiano401402.xyz/' };
+global.__ACCESSIBLE_VISION_BACKEND__ = 'greenCloud';
 global.document = {
   createElement(name) {
     if (name === 'canvas') return new MockCanvas();
@@ -75,7 +76,8 @@ global.webkit = {
 
 let findResult = null;
 let networkDepthRequests = 0;
-global.fetch = async (input) => {
+const findRequestBodies = [];
+global.fetch = async (input, init = {}) => {
   const path = new URL(typeof input === 'string' ? input : input.url, location.href).pathname;
   if (path === '/api/client-log') {
     return new Response(JSON.stringify({ ok: true }), { status: 200 });
@@ -85,6 +87,7 @@ global.fetch = async (input) => {
     return new Response(JSON.stringify({ ok: true, available: false }), { status: 200 });
   }
   if (path.startsWith('/api/find-object')) {
+    findRequestBodies.push(JSON.parse(init.body || '{}'));
     return new Response(JSON.stringify(findResult), {
       status: 200,
       headers: { 'Content-Type': 'application/json' }
@@ -159,6 +162,7 @@ async function run() {
   assert.equal(result.status, 'hand_missing');
   assert.equal(result.nativeLidar.decision, 'allow_hand_phase');
   assert.equal(result.nativeLidar.frameId, 1);
+  assert.equal(findRequestBodies.at(-1).nativeFindDepthPolicy, 'apple_lidar_only_v1');
 
   window.__accessibleVisionReceiveFrame(packet(2, 1.50));
   const farImage = captureReminderFrame({ maxWidth: 512, quality: 0.55 });
@@ -186,6 +190,21 @@ async function run() {
   assert.equal(result.status, 'walk_right');
   assert.equal(result.nativeLidar.decision, 'keep_approach_phase');
   assert.equal(result.nativeLidar.frameId, 2);
+  assert.equal(findRequestBodies.at(-1).nativeFindDepthPolicy, 'apple_lidar_only_v1');
+
+  window.__ACCESSIBLE_VISION_BACKEND__ = 'aliyun';
+  await fetch('/api/find-object-check', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      imageDataUrl: farImage,
+      target: 'test target',
+      frameCount: 3,
+      reminderSessionId: 'aliyun-test-session'
+    })
+  });
+  assert.equal(findRequestBodies.at(-1).nativeFindDepthPolicy, undefined);
+  window.__ACCESSIBLE_VISION_BACKEND__ = 'greenCloud';
 
   response = await fetch('/api/continuous-narration-depth', {
     method: 'POST',
@@ -214,9 +233,11 @@ async function run() {
   });
   result = await response.json();
   assert.equal(result.available, false);
-  assert.equal(networkDepthRequests, 1);
+  assert.equal(result.source, 'apple_lidar');
+  assert.equal(result.reason, 'native_lidar_unavailable');
+  assert.equal(networkDepthRequests, 0);
 
-  console.log('Native vision bridge harness: 12/12 PASS');
+  console.log('Native vision bridge harness: 18/18 PASS');
 }
 
 run().catch((error) => {

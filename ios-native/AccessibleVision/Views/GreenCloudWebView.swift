@@ -4,6 +4,7 @@ import WebKit
 
 struct GreenCloudWebView: UIViewRepresentable {
     let url: URL
+    let backend: AssistantBackend
     let camera: NativeCameraService
 
     func makeCoordinator() -> Coordinator {
@@ -16,6 +17,11 @@ struct GreenCloudWebView: UIViewRepresentable {
         configuration.mediaTypesRequiringUserActionForPlayback = []
         configuration.websiteDataStore = .default()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+        configuration.userContentController.addUserScript(WKUserScript(
+            source: "window.__ACCESSIBLE_VISION_BACKEND__ = '\(backend.rawValue)';",
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        ))
         configuration.userContentController.addUserScript(WKUserScript(
             source: NativeVisionBridgeScript.source,
             injectionTime: .atDocumentStart,
