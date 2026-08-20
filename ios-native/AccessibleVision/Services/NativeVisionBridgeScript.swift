@@ -15,6 +15,7 @@ enum NativeVisionBridgeScript {
         context: null,
         imageReady: false,
         nativeStream: null,
+        activeStreams: new Set(),
         findSessions: new Map(),
         lastNativeDepthAt: 0,
         runtimeHooksInstalled: false
@@ -68,11 +69,29 @@ enum NativeVisionBridgeScript {
       const originalGetUserMedia = navigator.mediaDevices?.getUserMedia
         ? navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices)
         : null;
+      const rememberMediaStream = (stream) => {
+        if (stream?.getTracks) state.activeStreams.add(stream);
+        return stream;
+      };
+      window.__accessibleVisionReleaseMedia = () => {
+        state.activeStreams.forEach((stream) => {
+          stream?.getTracks?.().forEach((track) => track.stop());
+        });
+        state.activeStreams.clear();
+        state.nativeStream?.getTracks?.().forEach((track) => track.stop());
+        state.nativeStream = null;
+        state.latest = null;
+        state.frames.clear();
+        state.frameOrder.length = 0;
+        state.captureRecords.length = 0;
+        state.imageReady = false;
+        postNative({ type: 'nativeMediaReleased' });
+      };
       if (originalGetUserMedia) {
         navigator.mediaDevices.getUserMedia = async (constraints = {}) => {
           const wantsVideo = Boolean(constraints?.video);
           if (!wantsVideo || typeof state.canvas.captureStream !== 'function') {
-            return originalGetUserMedia(constraints);
+            return rememberMediaStream(await originalGetUserMedia(constraints));
           }
           let audioStream = null;
           try {
@@ -89,12 +108,12 @@ enum NativeVisionBridgeScript {
               ...(audioStream?.getAudioTracks?.() || [])
             ];
             postNative({ type: 'nativeStreamStarted' });
-            return new MediaStream(tracks);
+            return rememberMediaStream(new MediaStream(tracks));
           } catch (error) {
             audioStream?.getTracks?.().forEach((track) => track.stop());
             postNative({ type: 'fallbackWebCamera', reason: String(error?.message || error) });
             await new Promise((resolve) => setTimeout(resolve, 350));
-            return originalGetUserMedia(constraints);
+            return rememberMediaStream(await originalGetUserMedia(constraints));
           }
         };
       }

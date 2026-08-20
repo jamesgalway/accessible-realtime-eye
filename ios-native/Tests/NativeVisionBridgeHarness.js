@@ -61,13 +61,16 @@ global.document = {
 };
 global.Image = MockImage;
 global.MediaStream = MockMediaStream;
-global.navigator = {
-  mediaDevices: {
-    async getUserMedia(constraints) {
-      return new MockMediaStream(constraints.audio ? [new MockTrack('audio')] : []);
+Object.defineProperty(global, 'navigator', {
+  configurable: true,
+  value: {
+    mediaDevices: {
+      async getUserMedia(constraints) {
+        return new MockMediaStream(constraints.audio ? [new MockTrack('audio')] : []);
+      }
     }
   }
-};
+});
 global.webkit = {
   messageHandlers: {
     nativeVision: { postMessage() {} }
@@ -136,6 +139,14 @@ function packet(frameId, meters, lidarAvailable = true) {
 
 async function run() {
   window.__accessibleVisionReceiveFrame(packet(1, 0.70));
+  const combinedStream = await navigator.mediaDevices.getUserMedia({
+    audio: true,
+    video: true
+  });
+  assert.equal(combinedStream.getAudioTracks().length, 1);
+  assert.equal(combinedStream.getVideoTracks().length, 1);
+  assert.ok(combinedStream.getTracks().every((track) => track.readyState === 'live'));
+
   const nearImage = captureReminderFrame({ maxWidth: 512, quality: 0.55 });
   assert.match(nearImage, /^data:image\/jpeg;base64,native-/);
   findResult = {
@@ -237,7 +248,10 @@ async function run() {
   assert.equal(result.reason, 'native_lidar_unavailable');
   assert.equal(networkDepthRequests, 0);
 
-  console.log('Native vision bridge harness: 18/18 PASS');
+  window.__accessibleVisionReleaseMedia();
+  assert.ok(combinedStream.getTracks().every((track) => track.readyState === 'ended'));
+
+  console.log('Native vision bridge harness: 23/23 PASS');
 }
 
 run().catch((error) => {

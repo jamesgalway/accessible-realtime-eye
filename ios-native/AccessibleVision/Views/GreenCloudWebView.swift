@@ -44,6 +44,7 @@ struct GreenCloudWebView: UIViewRepresentable {
     }
 
     static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+        coordinator.releaseMediaResources(in: webView)
         coordinator.detach()
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "nativeVision")
     }
@@ -72,6 +73,21 @@ struct GreenCloudWebView: UIViewRepresentable {
             webView = nil
             webReady = false
             latestPacket = nil
+        }
+
+        func releaseMediaResources(in webView: WKWebView) {
+            webView.pauseAllMediaPlayback {}
+            webView.evaluateJavaScript("""
+                window.__accessibleVisionReleaseMedia?.();
+                document.querySelectorAll('video, audio').forEach((element) => {
+                  element.srcObject?.getTracks?.().forEach((track) => track.stop());
+                  element.srcObject = null;
+                  element.pause?.();
+                });
+                """) { _, _ in
+                webView.stopLoading()
+                webView.loadHTMLString("", baseURL: nil)
+            }
         }
 
         func webView(
