@@ -4,15 +4,52 @@ struct WebAssistantView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var camera = NativeCameraService()
     @StateObject private var torch = NativeTorchController()
-    @State private var selectedBackend: AssistantBackend?
+    @State private var selectedBackend: AssistantBackend = .greenCloud
+    @State private var mediaCaptureRequested = false
 
     var body: some View {
-        Group {
-            if let selectedBackend {
-                liveAssistant(for: selectedBackend)
-            } else {
-                entrySelection
+        VStack(spacing: 0) {
+            HStack {
+                AccessibleTorchButton(isEnabled: torch.isEnabled) {
+                    torch.toggle()
+                }
+                .frame(width: 180, height: 44)
+                .accessibilitySortPriority(1000)
+
+                Spacer(minLength: 0)
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(.bar)
+
+            HStack(spacing: 12) {
+                backendButton(.greenCloud)
+                backendButton(.aliyun)
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+            .background(.bar)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("选择识别模型")
+
+            Divider()
+
+            GreenCloudWebView(
+                url: selectedBackend.baseURL,
+                backend: selectedBackend,
+                camera: camera,
+                onMediaCaptureRequested: {
+                    mediaCaptureRequested = true
+                    camera.start()
+                },
+                onMediaCaptureReleased: {
+                    mediaCaptureRequested = false
+                    torch.turnOff()
+                    camera.stop()
+                }
+            )
+            .id(selectedBackend.rawValue)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .alert(
             "闪光灯不可用",
@@ -30,7 +67,7 @@ struct WebAssistantView: View {
             camera.stop()
         }
         .onChange(of: scenePhase) { newPhase in
-            if newPhase == .active, selectedBackend != nil {
+            if newPhase == .active, mediaCaptureRequested {
                 camera.start()
             } else {
                 torch.turnOff()
@@ -39,83 +76,19 @@ struct WebAssistantView: View {
         }
     }
 
-    private var entrySelection: some View {
-        VStack(spacing: 20) {
-            Text("实时慧眼")
-                .font(.largeTitle)
-                .accessibilityAddTraits(.isHeader)
-
-            Text("请选择要进入的版本。进入后才会启动摄像头和麦克风；返回本页后会立即关闭，以节省电量。")
-                .multilineTextAlignment(.leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            ForEach(AssistantBackend.allCases) { backend in
-                Button("打开\(backend.title)") {
-                    selectedBackend = backend
-                }
-                .buttonStyle(.borderedProminent)
-                .frame(maxWidth: .infinity)
-                .accessibilityHint("双击进入实时慧眼，并启动摄像头和麦克风")
-            }
-
-            Text("当前摄像头、麦克风和 LiDAR 均未启动。")
-                .font(.footnote)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityLabel("当前摄像头、麦克风和雷达均未启动")
-        }
-        .padding(24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-    }
-
-    private func liveAssistant(for backend: AssistantBackend) -> some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Button("返回入口选择") {
-                    leaveLiveAssistant()
-                }
-                .buttonStyle(.bordered)
-                .accessibilityHint("双击返回，并关闭摄像头、麦克风和雷达")
-
-                Spacer(minLength: 0)
-
-                AccessibleTorchButton(isEnabled: torch.isEnabled) {
-                    torch.toggle()
-                }
-                .frame(width: 180, height: 44)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(.bar)
-
-            Text("当前入口：\(backend.title)")
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 8)
-                .background(.bar)
-                .accessibilityLabel("当前入口，\(backend.title)")
-
-            Divider()
-
-            GreenCloudWebView(
-                url: backend.baseURL,
-                backend: backend,
-                camera: camera
-            )
-            .id(backend.rawValue)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .onAppear {
-            camera.start()
-        }
-        .onDisappear {
+    private func backendButton(_ backend: AssistantBackend) -> some View {
+        let isSelected = selectedBackend == backend
+        return Button(backend.title) {
+            guard selectedBackend != backend else { return }
+            mediaCaptureRequested = false
             torch.turnOff()
             camera.stop()
+            selectedBackend = backend
         }
-    }
-
-    private func leaveLiveAssistant() {
-        torch.turnOff()
-        camera.stop()
-        selectedBackend = nil
+        .buttonStyle(.borderedProminent)
+        .tint(isSelected ? .accentColor : .secondary)
+        .accessibilityLabel(backend.title)
+        .accessibilityValue(isSelected ? "当前入口" : "未选择")
+        .accessibilityHint(isSelected ? "当前正在使用" : "双击切换到这个入口；旧任务会结束")
     }
 }

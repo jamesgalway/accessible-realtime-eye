@@ -73,9 +73,10 @@ Object.defineProperty(global, 'navigator', {
 });
 global.webkit = {
   messageHandlers: {
-    nativeVision: { postMessage() {} }
+    nativeVision: { postMessage(message) { nativeMessages.push(message); } }
   }
 };
+const nativeMessages = [];
 
 let findResult = null;
 let networkDepthRequests = 0;
@@ -146,6 +147,7 @@ async function run() {
   assert.equal(combinedStream.getAudioTracks().length, 1);
   assert.equal(combinedStream.getVideoTracks().length, 1);
   assert.ok(combinedStream.getTracks().every((track) => track.readyState === 'live'));
+  assert.ok(nativeMessages.some((message) => message.type === 'requestNativeMediaStart'));
 
   const nearImage = captureReminderFrame({ maxWidth: 512, quality: 0.55 });
   assert.match(nearImage, /^data:image\/jpeg;base64,native-/);
@@ -250,8 +252,9 @@ async function run() {
 
   window.__accessibleVisionReleaseMedia();
   assert.ok(combinedStream.getTracks().every((track) => track.readyState === 'ended'));
+  assert.ok(nativeMessages.some((message) => message.type === 'nativeMediaReleased'));
 
-  console.log('Native vision bridge harness: 23/23 PASS');
+  console.log('Native vision bridge harness: 25/25 PASS');
 }
 
 run().catch((error) => {

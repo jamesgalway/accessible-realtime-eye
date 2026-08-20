@@ -6,9 +6,15 @@ struct GreenCloudWebView: UIViewRepresentable {
     let url: URL
     let backend: AssistantBackend
     let camera: NativeCameraService
+    let onMediaCaptureRequested: () -> Void
+    let onMediaCaptureReleased: () -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(camera: camera)
+        Coordinator(
+            camera: camera,
+            onMediaCaptureRequested: onMediaCaptureRequested,
+            onMediaCaptureReleased: onMediaCaptureReleased
+        )
     }
 
     func makeUIView(context: Context) -> WKWebView {
@@ -51,12 +57,20 @@ struct GreenCloudWebView: UIViewRepresentable {
 
     final class Coordinator: NSObject, WKUIDelegate, WKNavigationDelegate, WKScriptMessageHandler {
         private let camera: NativeCameraService
+        private let onMediaCaptureRequested: () -> Void
+        private let onMediaCaptureReleased: () -> Void
         private weak var webView: WKWebView?
         private var webReady = false
         private var latestPacket: NativeVisionFramePacket?
 
-        init(camera: NativeCameraService) {
+        init(
+            camera: NativeCameraService,
+            onMediaCaptureRequested: @escaping () -> Void,
+            onMediaCaptureReleased: @escaping () -> Void
+        ) {
             self.camera = camera
+            self.onMediaCaptureRequested = onMediaCaptureRequested
+            self.onMediaCaptureReleased = onMediaCaptureReleased
         }
 
         func attach(to webView: WKWebView) {
@@ -76,6 +90,7 @@ struct GreenCloudWebView: UIViewRepresentable {
         }
 
         func releaseMediaResources(in webView: WKWebView) {
+            onMediaCaptureReleased()
             webView.pauseAllMediaPlayback {}
             webView.evaluateJavaScript("""
                 window.__accessibleVisionReleaseMedia?.();
@@ -122,7 +137,11 @@ struct GreenCloudWebView: UIViewRepresentable {
             guard message.name == "nativeVision" else { return }
             let body = message.body as? [String: Any]
             let type = String(body?["type"] as? String ?? "")
-            if type == "fallbackWebCamera" {
+            if type == "requestNativeMediaStart" {
+                onMediaCaptureRequested()
+            } else if type == "nativeMediaReleased" {
+                onMediaCaptureReleased()
+            } else if type == "fallbackWebCamera" {
                 camera.stop()
             }
         }

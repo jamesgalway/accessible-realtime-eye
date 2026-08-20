@@ -16,6 +16,7 @@ enum NativeVisionBridgeScript {
         imageReady: false,
         nativeStream: null,
         activeStreams: new Set(),
+        wrappedTracks: new WeakSet(),
         findSessions: new Map(),
         lastNativeDepthAt: 0,
         runtimeHooksInstalled: false
@@ -70,7 +71,28 @@ enum NativeVisionBridgeScript {
         ? navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices)
         : null;
       const rememberMediaStream = (stream) => {
-        if (stream?.getTracks) state.activeStreams.add(stream);
+        if (stream?.getTracks) {
+          state.activeStreams.add(stream);
+          stream.getTracks().forEach((track) => {
+            if (!track?.stop || state.wrappedTracks.has(track)) return;
+            state.wrappedTracks.add(track);
+            const originalStop = track.stop.bind(track);
+            track.stop = () => {
+              originalStop();
+              state.activeStreams.forEach((candidate) => {
+                const live = candidate?.getTracks?.().some((item) => item.readyState === 'live');
+                if (!live) state.activeStreams.delete(candidate);
+              });
+              const hasLiveMedia = Array.from(state.activeStreams).some((candidate) => (
+                candidate?.getTracks?.().some((item) => item.readyState === 'live')
+              ));
+              if (!hasLiveMedia) {
+                state.nativeStream = null;
+                postNative({ type: 'nativeMediaReleased' });
+              }
+            };
+          });
+        }
         return stream;
       };
       window.__accessibleVisionReleaseMedia = () => {
@@ -89,6 +111,7 @@ enum NativeVisionBridgeScript {
       };
       if (originalGetUserMedia) {
         navigator.mediaDevices.getUserMedia = async (constraints = {}) => {
+          postNative({ type: 'requestNativeMediaStart' });
           const wantsVideo = Boolean(constraints?.video);
           if (!wantsVideo || typeof state.canvas.captureStream !== 'function') {
             return rememberMediaStream(await originalGetUserMedia(constraints));

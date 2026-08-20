@@ -9,28 +9,40 @@ const webView = fs.readFileSync(
   'ios-native/AccessibleVision/Views/GreenCloudWebView.swift',
   'utf8'
 );
+const bridge = fs.readFileSync(
+  'ios-native/AccessibleVision/Services/NativeVisionBridgeScript.swift',
+  'utf8'
+);
 
 assert.match(
   view,
-  /@State private var selectedBackend: AssistantBackend\?\s*$/m,
-  'App launch must not preselect a live backend.'
-);
-assert.match(
-  view,
-  /if let selectedBackend\s*\{[\s\S]*?liveAssistant\(for: selectedBackend\)[\s\S]*?\}\s*else\s*\{[\s\S]*?entrySelection/,
-  'The entry selection must render before the live assistant.'
+  /@State private var selectedBackend: AssistantBackend = \.greenCloud\s*$/m,
+  'The original direct interface must open on GreenCloud.'
 );
 assert.doesNotMatch(
   view,
-  /@State private var selectedBackend: AssistantBackend\s*=/,
-  'A backend must not be selected automatically.'
+  /entrySelection|返回入口选择/,
+  'The app must not add a separate entry-selection screen.'
 );
-assert.match(view, /private func liveAssistant\(for backend: AssistantBackend\)/);
-assert.match(view, /\.onAppear\s*\{\s*camera\.start\(\)\s*\}/);
+assert.doesNotMatch(
+  view,
+  /selectedBackend: AssistantBackend\?/,
+  'The direct interface must not wait for a backend selection.'
+);
+assert.match(view, /backendButton\(\.greenCloud\)/);
+assert.match(view, /backendButton\(\.aliyun\)/);
+assert.match(view, /GreenCloudWebView\([\s\S]*?url: selectedBackend\.baseURL/);
+assert.doesNotMatch(
+  view,
+  /\.onAppear\s*\{\s*camera\.start\(\)\s*\}/,
+  'Opening a backend page must not start the camera.'
+);
+assert.match(view, /onMediaCaptureRequested:[\s\S]*?mediaCaptureRequested = true[\s\S]*?camera\.start\(\)/);
+assert.match(view, /onMediaCaptureReleased:[\s\S]*?mediaCaptureRequested = false[\s\S]*?camera\.stop\(\)/);
 assert.match(
   view,
-  /private func leaveLiveAssistant\(\)\s*\{[\s\S]*?torch\.turnOff\(\)[\s\S]*?camera\.stop\(\)[\s\S]*?selectedBackend = nil/,
-  'Leaving the live page must stop native hardware before returning to the menu.'
+  /guard selectedBackend != backend else \{ return \}[\s\S]*?mediaCaptureRequested = false[\s\S]*?camera\.stop\(\)[\s\S]*?selectedBackend = backend/,
+  'Switching backends must stop the previous native media session.'
 );
 assert.match(
   webView,
@@ -39,5 +51,9 @@ assert.match(
 );
 assert.match(webView, /__accessibleVisionReleaseMedia/);
 assert.match(webView, /getTracks\?\.\(\)\.forEach\(\(track\) => track\.stop\(\)\)/);
+assert.match(webView, /requestNativeMediaStart/);
+assert.match(webView, /nativeMediaReleased/);
+assert.match(bridge, /postNative\(\{ type: 'requestNativeMediaStart' \}\)/);
+assert.match(bridge, /postNative\(\{ type: 'nativeMediaReleased' \}\)/);
 
-console.log('App launch lifecycle harness: 9/9 PASS');
+console.log('App launch lifecycle harness: 17/17 PASS');
