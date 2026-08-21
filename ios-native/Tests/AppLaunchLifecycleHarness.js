@@ -41,6 +41,22 @@ assert.match(view, /onMediaCaptureRequested:[\s\S]*?mediaCaptureRequested = true
 assert.match(view, /onMediaCaptureReleased:[\s\S]*?mediaCaptureRequested = false[\s\S]*?camera\.stop\(\)/);
 assert.match(
   view,
+  /onMediaCaptureRequested:[\s\S]*?setIdleTimerDisabled\(true\)[\s\S]*?camera\.start\(\)/,
+  'A formally started session must prevent idle dimming and locking.'
+);
+assert.match(
+  view,
+  /onMediaCaptureReleased:[\s\S]*?setIdleTimerDisabled\(false\)[\s\S]*?camera\.stop\(\)/,
+  'Ending the formal session must restore the system idle timer.'
+);
+assert.match(
+  view,
+  /onChange\(of: scenePhase\)[\s\S]*?newPhase == \.active, mediaCaptureRequested[\s\S]*?setIdleTimerDisabled\(true\)[\s\S]*?else[\s\S]*?setIdleTimerDisabled\(false\)/,
+  'Only a foreground formal session may keep the screen awake.'
+);
+assert.match(view, /UIApplication\.shared\.isIdleTimerDisabled = disabled/);
+assert.match(
+  view,
   /guard selectedBackend != backend else \{ return \}[\s\S]*?mediaCaptureRequested = false[\s\S]*?camera\.stop\(\)[\s\S]*?selectedBackend = backend/,
   'Switching backends must stop the previous native media session.'
 );
@@ -56,4 +72,4 @@ assert.match(webView, /nativeMediaReleased/);
 assert.match(bridge, /postNative\(\{ type: 'requestNativeMediaStart' \}\)/);
 assert.match(bridge, /postNative\(\{ type: 'nativeMediaReleased' \}\)/);
 
-console.log('App launch lifecycle harness: 17/17 PASS');
+console.log('App launch lifecycle harness: 21/21 PASS');

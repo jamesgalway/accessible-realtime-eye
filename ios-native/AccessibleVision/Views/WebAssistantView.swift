@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct WebAssistantView: View {
     @Environment(\.scenePhase) private var scenePhase
@@ -40,10 +41,12 @@ struct WebAssistantView: View {
                 camera: camera,
                 onMediaCaptureRequested: {
                     mediaCaptureRequested = true
+                    setIdleTimerDisabled(true)
                     camera.start()
                 },
                 onMediaCaptureReleased: {
                     mediaCaptureRequested = false
+                    setIdleTimerDisabled(false)
                     torch.turnOff()
                     camera.stop()
                 }
@@ -63,13 +66,16 @@ struct WebAssistantView: View {
             Text(torch.errorMessage)
         }
         .onDisappear {
+            setIdleTimerDisabled(false)
             torch.turnOff()
             camera.stop()
         }
         .onChange(of: scenePhase) { newPhase in
             if newPhase == .active, mediaCaptureRequested {
+                setIdleTimerDisabled(true)
                 camera.start()
             } else {
+                setIdleTimerDisabled(false)
                 torch.turnOff()
                 camera.stop()
             }
@@ -81,6 +87,7 @@ struct WebAssistantView: View {
         return Button(backend.title) {
             guard selectedBackend != backend else { return }
             mediaCaptureRequested = false
+            setIdleTimerDisabled(false)
             torch.turnOff()
             camera.stop()
             selectedBackend = backend
@@ -90,5 +97,9 @@ struct WebAssistantView: View {
         .accessibilityLabel(backend.title)
         .accessibilityValue(isSelected ? "当前入口" : "未选择")
         .accessibilityHint(isSelected ? "当前正在使用" : "双击切换到这个入口；旧任务会结束")
+    }
+
+    private func setIdleTimerDisabled(_ disabled: Bool) {
+        UIApplication.shared.isIdleTimerDisabled = disabled
     }
 }
