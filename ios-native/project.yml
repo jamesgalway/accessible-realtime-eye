@@ -30,6 +30,7 @@ targets:
           - UIInterfaceOrientationPortrait
         NSCameraUsageDescription: "实时慧眼需要使用后置摄像头识别环境和寻找物品。"
         NSMicrophoneUsageDescription: "实时慧眼需要使用麦克风接收你的任务和问题。"
+        NSLocationWhenInUseUsageDescription: "实时慧眼只在导航期间使用你的位置，用于路线跟随、转弯提醒和偏航判断。"
         GreenCloudBaseURL: "$(GREEN_CLOUD_BASE_URL)"
         AliyunBaseURL: "$(ALIYUN_BASE_URL)"
     settings:
