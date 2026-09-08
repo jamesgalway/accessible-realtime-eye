@@ -11,6 +11,7 @@ struct GreenCloudWebView: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
+            origin: url,
             camera: camera,
             onMediaCaptureRequested: onMediaCaptureRequested,
             onMediaCaptureReleased: onMediaCaptureReleased
@@ -34,6 +35,12 @@ struct GreenCloudWebView: UIViewRepresentable {
             forMainFrameOnly: true
         ))
         configuration.userContentController.add(context.coordinator, name: "nativeVision")
+        configuration.userContentController.addUserScript(WKUserScript(
+            source: NativeLocationBridge.script,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        ))
+        configuration.userContentController.add(context.coordinator, name: "nativeLocation")
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         context.coordinator.attach(to: webView)
@@ -53,9 +60,11 @@ struct GreenCloudWebView: UIViewRepresentable {
         coordinator.releaseMediaResources(in: webView)
         coordinator.detach()
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "nativeVision")
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "nativeLocation")
     }
 
     final class Coordinator: NSObject, WKUIDelegate, WKNavigationDelegate, WKScriptMessageHandler {
+        private let location: NativeLocationBridge
         private let camera: NativeCameraService
         private let onMediaCaptureRequested: () -> Void
         private let onMediaCaptureReleased: () -> Void
@@ -64,10 +73,12 @@ struct GreenCloudWebView: UIViewRepresentable {
         private var latestPacket: NativeVisionFramePacket?
 
         init(
+            origin: URL,
             camera: NativeCameraService,
             onMediaCaptureRequested: @escaping () -> Void,
             onMediaCaptureReleased: @escaping () -> Void
         ) {
+            self.location = NativeLocationBridge(origin: origin)
             self.camera = camera
             self.onMediaCaptureRequested = onMediaCaptureRequested
             self.onMediaCaptureReleased = onMediaCaptureReleased
@@ -83,6 +94,7 @@ struct GreenCloudWebView: UIViewRepresentable {
         }
 
         func detach() {
+            location.stop()
             camera.onFramePacket = nil
             webView = nil
             webReady = false
@@ -116,6 +128,7 @@ struct GreenCloudWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            location.stop()
             webReady = false
         }
 
@@ -134,6 +147,10 @@ struct GreenCloudWebView: UIViewRepresentable {
             _ userContentController: WKUserContentController,
             didReceive message: WKScriptMessage
         ) {
+            if message.name == "nativeLocation", let webView {
+                location.receive(message, in: webView)
+                return
+            }
             guard message.name == "nativeVision" else { return }
             let body = message.body as? [String: Any]
             let type = String(body?["type"] as? String ?? "")
