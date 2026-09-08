@@ -12,7 +12,7 @@ settings:
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
     GREEN_CLOUD_BASE_URL: "https://gemini-eye.zzypiano401402.xyz"
-    ALIYUN_BASE_URL: "https://121.40.253.186.sslip.io:8443"
+    ALIYUN_BASE_URL: "https://47.94.130.89.sslip.io:8443"
 targets:
   AccessibleVision:
     type: application
