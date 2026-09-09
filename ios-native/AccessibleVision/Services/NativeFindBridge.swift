@@ -11,6 +11,7 @@ final class NativeFindBridge {
     private static let phrases = [
         "left": "往左一点。", "right": "往右一点。", "forward": "慢慢往前。",
         "aligned": "对准了。", "stop": "停一下。", "lost": "停一下，重新对准。",
+        "aim_up": "手机抬高一点。", "aim_down": "手机放低一点。",
         "hand_left": "手往左一点。", "hand_right": "手往右一点。",
         "hand_up": "手往手机顶部方向一点。", "hand_down": "手往手机底部方向一点。",
         "hand_forward": "手慢慢向目标靠近。", "hold": "停手，正在确认。",
@@ -67,7 +68,7 @@ final class NativeFindBridge {
     }
 
     static var script: String {
-        let sources = ["NativeFindPolicy", "NativeFindRuntime"].compactMap { name -> String? in
+        let sources = ["NativeFindPolicy", "NativeFindAnchorRuntime"].compactMap { name -> String? in
             guard let url = Bundle.main.url(forResource: name, withExtension: "js") else { return nil }
             return try? String(contentsOf: url, encoding: .utf8)
         }

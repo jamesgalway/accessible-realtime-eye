@@ -153,12 +153,12 @@ final class NativeCameraService: NSObject, ObservableObject, ARSessionDelegate {
 
         let now = ProcessInfo.processInfo.systemUptime
         guard now - lastPacketTime >= Self.packetInterval else {
-            findTracker.process(frame, packetId: nil)
+            findTracker.process(frame, packet: nil)
             return
         }
         lastPacketTime = now
         guard let packet = makeFramePacket(from: frame, hasDepth: hasDepth) else { return }
-        findTracker.process(frame, packetId: packet.frameId)
+        findTracker.process(frame, packet: packet)
         onFramePacket?(packet)
     }
 
