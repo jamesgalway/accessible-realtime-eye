@@ -141,11 +141,36 @@
       token:`nf_${Date.now()}_${++counter}`,phase:'lock',seedFrame:0,anchorReady:false,observation:null,
       inFlight:false,lastModelFrame:0,retryAt:Date.now()+400,lastCode:'',lastSaid:0,speechGuardUntil:0};
     current=s;post({type:'begin',token:s.token});timer=setInterval(()=>tick(s),100);
-    log('started',{target:s.target,token:s.token,version:24,voice:'existing_model'});
+    log('started',{target:s.target,token:s.token,version:25,voice:'existing_model'});
   }
-  function stopFeedback(){
-    const originalReminder=current?.reminder;if(!originalReminder)return;
-    stop();if(exitTimer)clearInterval(exitTimer);
+  function clearStoppedAudio(){
+    const r=appState.geminiReminder,rt=appState.realtime;
+    if(r){
+      r.pendingDistributorAnnouncement='';r.returnToUnifiedAfterAliSpeech='';r.returnToUnifiedAfterTurn='';
+      r.player?.reset();r.turnInProgress=false;r.assistantResponseActive=false;
+      r.playbackActive=false;r.playbackUntil=0;r.suppressAssistantAudioUntilTurnComplete=false;
+      r.audioQueue=[];r.audioQueueBytes=0;r.inputTranscriptBuffer='';r.outputTranscriptBuffer='';
+    }
+    if(rt){
+      rt.player?.reset();rt.responseInProgress=false;rt.assistantPlaybackActive=false;rt.assistantPlaybackUntil=0;
+      rt.suppressAssistantOutputUntilManualCommit=false;
+      rt.pendingManualResponseAfterTranscript=false;rt.pendingManualTranscriptStartedAt=0;
+      rt.localVadSpeaking=false;rt.localVadInterrupting=false;rt.localVadPlaybackCandidateFrames=[];
+      rt.localVadPlaybackHighFrames=0;
+    }
+    for(const name of ['assistantMicMuteTimer','assistantVadRestoreTimer']){
+      if(appState[name])clearTimeout(appState[name]);appState[name]=null;
+    }
+    if(typeof setGeminiAssistantResponseActive==='function'&&r)setGeminiAssistantResponseActive(r,false);
+    if(typeof setLocalMicrophoneEnabled==='function')setLocalMicrophoneEnabled(true,'native special task exit');
+    for(const owner of [r,rt]){
+      const ctx=owner?.audioContext;
+      if(ctx&&ctx.state!=='closed'&&ctx.state!=='running')Promise.resolve(ctx.resume()).catch(()=>{});
+    }
+    log('exit_audio_cleared',{transport:r?.transport||'',microphoneEnabled:true});
+  }
+  function stopFeedback(mode){
+    if(exitTimer)clearInterval(exitTimer);
     const started=Date.now();let destination=null;
     // The real stop-button handler runs after this capture handler and clears or
     // recreates the host session. Confirm through that resulting model voice.
@@ -156,14 +181,14 @@
       }
       if(!r?.isReady||r.findTarget||Date.now()-started<300)return;
       destination=r;
-      if(!voiceBusy(r)&&sendGeminiLiveEvent({type:'say',text:'找东西已停止，可以继续使用慧眼。',deliveryMode:'guidance'})){
+      const text=mode==='continuous_narration'?'持续播报已停止，可以继续使用慧眼。':'找东西已停止，可以继续使用慧眼。';
+      if(!voiceBusy(r)&&sendGeminiLiveEvent({type:'say',text,deliveryMode:'guidance'})){
         log('stop_confirmation_sent',{});clearInterval(exitTimer);exitTimer=null;
       }
     },300);
   }
   document.addEventListener('click',event=>{
     const button=event.target?.closest?.('button'),id=button?.id||'';
-    if(id==='stop-realtime'){stopFeedback();return;}
     if(!id.startsWith('start-'))return;
     selected=id===(window.__ACCESSIBLE_VISION_BACKEND__==='aliyun'?'start-aliyun-unified-visual-assistant':'start-unified-visual-assistant');stop();
   },true);
@@ -173,6 +198,24 @@
     previousHooks?.();if(window.__nativeFindHooks||typeof runGeminiFindObjectTick!=='function')return;
     window.__nativeFindHooks=true;
     fetch('/api/native-find-config').then(r=>r.json()).then(c=>{enabled=c.enabled===true&&c.version===1;}).catch(()=>{});
+    const stopButton=document.getElementById('stop-realtime');
+    if(stopButton&&typeof handleRealtimeStopButton==='function'){
+      const originalStop=handleRealtimeStopButton;let exiting=false;
+      stopButton.removeEventListener('click',originalStop);
+      handleRealtimeStopButton=async function(...args){
+        if(exiting)return;
+        const mode=getActiveSpecialTaskModeForStop();
+        if(!['find_object','continuous_narration'].includes(mode))return originalStop.apply(this,args);
+        exiting=true;stop();if(exitTimer){clearInterval(exitTimer);exitTimer=null;}
+        try{
+          await originalStop.apply(this,args);
+          if(!getActiveSpecialTaskModeForStop()){
+            clearStoppedAudio();stopFeedback(mode);
+          }
+        }finally{exiting=false;}
+      };
+      stopButton.addEventListener('click',handleRealtimeStopButton);
+    }
     oldTick=runGeminiFindObjectTick;
     runGeminiFindObjectTick=function(reminder){
       if(current&&alive(current)){
