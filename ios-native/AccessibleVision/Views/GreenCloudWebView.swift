@@ -41,6 +41,10 @@ struct GreenCloudWebView: UIViewRepresentable {
             forMainFrameOnly: true
         ))
         configuration.userContentController.add(context.coordinator, name: "nativeLocation")
+        configuration.userContentController.addUserScript(WKUserScript(
+            source: NativeFindBridge.script, injectionTime: .atDocumentStart, forMainFrameOnly: true
+        ))
+        configuration.userContentController.add(context.coordinator, name: "nativeFind")
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         context.coordinator.attach(to: webView)
@@ -61,10 +65,12 @@ struct GreenCloudWebView: UIViewRepresentable {
         coordinator.detach()
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "nativeVision")
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "nativeLocation")
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "nativeFind")
     }
 
     final class Coordinator: NSObject, WKUIDelegate, WKNavigationDelegate, WKScriptMessageHandler {
         private let location: NativeLocationBridge
+        private let find: NativeFindBridge
         private let camera: NativeCameraService
         private let onMediaCaptureRequested: () -> Void
         private let onMediaCaptureReleased: () -> Void
@@ -79,6 +85,7 @@ struct GreenCloudWebView: UIViewRepresentable {
             onMediaCaptureReleased: @escaping () -> Void
         ) {
             self.location = NativeLocationBridge(origin: origin)
+            self.find = NativeFindBridge(origin: origin, camera: camera)
             self.camera = camera
             self.onMediaCaptureRequested = onMediaCaptureRequested
             self.onMediaCaptureReleased = onMediaCaptureReleased
@@ -86,6 +93,7 @@ struct GreenCloudWebView: UIViewRepresentable {
 
         func attach(to webView: WKWebView) {
             self.webView = webView
+            find.attach(webView)
             camera.onFramePacket = { [weak self] packet in
                 DispatchQueue.main.async {
                     self?.receive(packet)
@@ -94,6 +102,7 @@ struct GreenCloudWebView: UIViewRepresentable {
         }
 
         func detach() {
+            find.stop()
             location.stop()
             camera.onFramePacket = nil
             webView = nil
@@ -128,6 +137,7 @@ struct GreenCloudWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            find.stop()
             location.stop()
             webReady = false
         }
@@ -151,6 +161,7 @@ struct GreenCloudWebView: UIViewRepresentable {
                 location.receive(message, in: webView)
                 return
             }
+            if message.name == "nativeFind" { find.receive(message); return }
             guard message.name == "nativeVision" else { return }
             let body = message.body as? [String: Any]
             let type = String(body?["type"] as? String ?? "")

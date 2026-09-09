@@ -42,6 +42,7 @@ enum NativeVisionBridgeScript {
       window.__accessibleVisionReceiveFrame = (packet) => {
         if (!packet || !packet.frameId || !packet.imageDataUrl) return;
         state.latest = packet;
+        window.__nativeFindFrame?.(packet);
         rememberFrame(packet);
         const image = new Image();
         image.onload = () => {

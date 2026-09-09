@@ -37,6 +37,15 @@ final class NativeCameraService: NSObject, ObservableObject, ARSessionDelegate {
     @Published private(set) var statusText = "尚未启动摄像头。"
 
     var onFramePacket: ((NativeVisionFramePacket) -> Void)?
+    let findTracker = NativeFindTracker()
+
+    func findCommand(_ body: [String: Any]) {
+        frameQueue.async { [weak self] in self?.findTracker.command(body) }
+    }
+
+    func setFindObserver(_ callback: @escaping ([String: Any]) -> Void) {
+        frameQueue.async { [weak self] in self?.findTracker.onUpdate = callback }
+    }
 
     private let frameQueue = DispatchQueue(label: "com.zzypiano.accessiblevision.frames")
     private let frameLock = NSLock()
@@ -79,6 +88,7 @@ final class NativeCameraService: NSObject, ObservableObject, ARSessionDelegate {
     }
 
     func stop() {
+        frameQueue.async { [weak self] in self?.findTracker.stop() }
         setTorch(enabled: false)
         session.pause()
         frameLock.lock()
@@ -142,9 +152,13 @@ final class NativeCameraService: NSObject, ObservableObject, ARSessionDelegate {
         }
 
         let now = ProcessInfo.processInfo.systemUptime
-        guard now - lastPacketTime >= Self.packetInterval else { return }
+        guard now - lastPacketTime >= Self.packetInterval else {
+            findTracker.process(frame, packetId: nil)
+            return
+        }
         lastPacketTime = now
         guard let packet = makeFramePacket(from: frame, hasDepth: hasDepth) else { return }
+        findTracker.process(frame, packetId: packet.frameId)
         onFramePacket?(packet)
     }
 
