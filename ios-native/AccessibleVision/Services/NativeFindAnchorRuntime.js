@@ -10,16 +10,22 @@
   const busy=s=>s.reminder.turnInProgress||isGeminiPlaybackActive(s.reminder)||Date.now()<s.modelSpeechUntil;
   const mute=s=>post({type:'mute',token:s.token});
   function stop(){
-    if(current){current.abort?.abort();post({type:'stop'});log('stopped',{token:current.token});}
+    if(current){current.reminder.nativeFindHandStage=false;current.abort?.abort();post({type:'stop'});log('stopped',{token:current.token});}
     current=null;if(timer)clearInterval(timer);timer=null;
   }
-  function local(s,code){
-    if(!alive(s)||busy(s))return;
+  function finishFromButton(){
+    const s=current;if(!s)return;
+    s.reminder.nativeFindHandStage=false;s.abort?.abort();post({type:'finish',token:s.token,code:'stopped'});
+    log('stopped',{token:s.token,reason:'stop_button'});current=null;if(timer)clearInterval(timer);timer=null;
+  }
+  function local(s,code,force=false){
+    if(!alive(s)||(!force&&busy(s)))return false;
     const now=Date.now();
-    if(s.lastCode===code&&now-s.lastSaid<NativeFindPolicy.repeatMs(code))return;
-    if(now-s.lastSaid<850&&!['lost','stop'].includes(code))return;
+    if(s.lastCode===code&&now-s.lastSaid<NativeFindPolicy.repeatMs(code))return false;
+    if(now-s.lastSaid<850&&!['lost','stop','reach'].includes(code))return false;
     post({type:'speak',token:s.token,code});s.lastCode=code;s.lastSaid=now;
     log('local_guidance',{code,phase:s.phase,meters:s.observation?.meters,source:'lidar_world_anchor'});
+    return true;
   }
   function announce(s){
     if(!s.firstResult||s.announced||busy(s))return false;
@@ -41,7 +47,7 @@
     const s=current;if(!s||!alive(s)||o.token!==s.token||o.seedFrameId!==s.seedFrame)return;
     s.observation=o;
     if(o.valid){s.anchorReady=true;return;}
-    mute(s);local(s,'lost');
+    local(s,'lost');
     // Only initial depth/seed failure retries recognition. Once anchored, preserve
     // the stationary target through off-screen motion and temporary AR interruption.
     if(o.lost&&!s.anchorReady){s.seedFailed=true;s.retryAt=Date.now()+1200;}
@@ -71,7 +77,7 @@
       const result=await response.json();if(!alive(s))return;
       if(!response.ok||!result.ok)throw new Error(result.error||'recognition_failed');
       if(result.token!==s.token||result.frameId!==frame.frameId||Date.now()-frame.capturedAtMs>11000)return;
-      if(!result.visible||!Array.isArray(result.box)){s.retryAt=Date.now()+1000;return;}
+      if(!result.visible||!Array.isArray(result.box)){s.retryAt=Date.now()+1000;local(s,'search');return;}
       s.seedFrame=frame.frameId;s.initialMeters=frameDepth(frame,result.box);s.firstResult=result;
       log('seed',{frameId:frame.frameId,box:result.box,initialMeters:s.initialMeters});
       s.phase='approach';s.observation=null;s.seedAt=Date.now();
@@ -82,7 +88,8 @@
   }
   function handover(s){
     if(!alive(s)||busy(s))return;
-    mute(s);post({type:'stop'});s.phase='legacy_hand';
+    s.phase='legacy_hand';s.reminder.nativeFindHandStage=true;
+    post({type:'handover',token:s.token,code:'reach'});
     s.reminder.findLocationAnnounced=true;s.reminder.findTargetLocked=true;
     s.reminder.findTargetSeenCount=Math.max(2,s.reminder.findTargetSeenCount||0);
     s.reminder.findLastSpokenStatus='';s.reminder.findLastSpokenAt=0;
@@ -95,11 +102,12 @@
     if(s.phase==='legacy_hand')return;
     if(!s.announced&&s.firstResult){announce(s);return;}
     if(!s.anchorReady){
+      if(s.phase==='lock'||s.seedFailed)local(s,'search');
       if(s.phase==='lock'||s.seedFailed||(s.seedAt&&Date.now()-s.seedAt>1500))recognize(s);
       return;
     }
     const o=s.observation;
-    if(!NativeFindPolicy.fresh(o,Date.now())){mute(s);local(s,'lost');return;}
+    if(!NativeFindPolicy.fresh(o,Date.now())){local(s,'lost');return;}
     // Coordinate remains valid outside camera view: only local corrections, no cloud call.
     if(o.onScreen&&o.meters<=0.85){local(s,'stop');handover(s);return;}
     const code=NativeFindPolicy.approach(o,s.lastCode);
@@ -118,12 +126,21 @@
     const id=event.target?.closest?.('button')?.id||'';if(!id.startsWith('start-'))return;
     selected=id===(window.__ACCESSIBLE_VISION_BACKEND__==='aliyun'?'start-aliyun-unified-visual-assistant':'start-unified-visual-assistant');stop();
   },true);
+  document.addEventListener('click',event=>{if(event.target?.closest?.('button')?.id==='stop-realtime')finishFromButton();},true);
   document.addEventListener('visibilitychange',()=>{if(document.hidden)stop();});window.addEventListener('pagehide',stop);
   const previousHooks=window.__accessibleVisionEnableRuntimeHooks;
   window.__accessibleVisionEnableRuntimeHooks=()=>{
     previousHooks?.();if(window.__nativeFindHooks||typeof runGeminiFindObjectTick!=='function')return;
     window.__nativeFindHooks=true;
     fetch('/api/native-find-config').then(r=>r.json()).then(c=>{enabled=c.enabled===true&&c.version===1;}).catch(()=>{});
+    const originalPlaybackActive=isGeminiPlaybackActive;
+    isGeminiPlaybackActive=function(reminder){
+      // The original hand-guidance voice remains authoritative. Once its model
+      // turn has completed, ignore a stale audio-player latch so the next
+      // recognized hand/target relation can be spoken instead of staying mute.
+      if(current?.phase==='legacy_hand'&&reminder===current.reminder&&!reminder.turnInProgress)return false;
+      return originalPlaybackActive.apply(this,arguments);
+    };
     oldTick=runGeminiFindObjectTick;
     runGeminiFindObjectTick=function(reminder){
       if(!selected||!enabled||!latest?.lidarAvailable){stop();return oldTick.apply(this,arguments);}

@@ -26,6 +26,9 @@ const NativeFindPolicy = {
     return canApproach ? 'forward' : 'aligned';
   },
   fresh(observation, now) { return observation?.valid === true && now - observation.at < 500 && now >= observation.at; },
-  repeatMs(code) { return ['aligned', 'hand_missing', 'hold', 'stop'].includes(code) ? 3000 : 1000; }
+  repeatMs(code) {
+    if (code === 'search') return 2500;
+    return ['aligned', 'hand_missing', 'hold', 'stop', 'reach'].includes(code) ? 2200 : 1000;
+  }
 };
 if (typeof module !== 'undefined') module.exports = NativeFindPolicy;

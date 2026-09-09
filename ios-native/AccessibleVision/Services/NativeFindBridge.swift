@@ -10,7 +10,9 @@ final class NativeFindBridge {
     private var lastSpeechAt = Date.distantPast
     private static let phrases = [
         "left": "往左一点。", "right": "往右一点。", "forward": "慢慢往前。",
-        "aligned": "对准了。", "stop": "停一下。", "lost": "停一下，重新对准。",
+        "aligned": "对准了。", "stop": "停一下。", "lost": "停一下，往回对准目标。",
+        "search": "还没找到，请慢慢移动镜头。", "reach": "已经靠近，请伸手。",
+        "stopped": "找东西已停止，慧眼可以继续使用。",
         "aim_up": "手机抬高一点。", "aim_down": "手机放低一点。",
         "hand_left": "手往左一点。", "hand_right": "手往右一点。",
         "hand_up": "手往手机顶部方向一点。", "hand_down": "手往手机底部方向一点。",
@@ -53,18 +55,38 @@ final class NativeFindBridge {
         }
         guard !token.isEmpty, body["token"] as? String == token else { return }
         if type == "mute" { speech.stopSpeaking(at: .immediate); return }
+        if type == "handover", let code = body["code"] as? String,
+           let phrase = Self.phrases[code] {
+            camera.findCommand(["type": "stop"])
+            speak(phrase, urgent: true)
+            return
+        }
+        if type == "finish", let code = body["code"] as? String,
+           let phrase = Self.phrases[code] {
+            camera.findCommand(["type": "stop"])
+            speak(phrase, urgent: true)
+            token = ""
+            return
+        }
         if type == "speak", let code = body["code"] as? String,
            let phrase = Self.phrases[code] {
             let urgent = ["stop", "lost", "hold"].contains(code)
             guard urgent || Date().timeIntervalSince(lastSpeechAt) >= 0.8 else { return }
-            speech.stopSpeaking(at: .immediate)
-            let utterance = AVSpeechUtterance(string: phrase)
-            utterance.voice = AVSpeechSynthesisVoice(language: "zh-CN")
-            utterance.rate = 0.55
-            lastSpeechAt = Date(); speech.speak(utterance)
+            speak(phrase, urgent: urgent)
             return
         }
         if type == "seed" || type == "hand" { camera.findCommand(body) }
+    }
+
+    private func speak(_ phrase: String, urgent: Bool) {
+        if urgent || speech.isSpeaking {
+            speech.stopSpeaking(at: .immediate)
+        }
+        let utterance = AVSpeechUtterance(string: phrase)
+        utterance.voice = AVSpeechSynthesisVoice(language: "zh-CN")
+        utterance.rate = 0.55
+        lastSpeechAt = Date()
+        speech.speak(utterance)
     }
 
     static var script: String {
