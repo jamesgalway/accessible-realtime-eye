@@ -40,7 +40,10 @@ final class NativeCameraService: NSObject, ObservableObject, ARSessionDelegate {
     let findTracker = NativeFindTracker()
 
     func findCommand(_ body: [String: Any]) {
-        frameQueue.async { [weak self] in self?.findTracker.command(body) }
+        frameQueue.async { [weak self] in
+            guard let self else { return }
+            self.findTracker.command(body, session: self.session)
+        }
     }
 
     func setFindObserver(_ callback: @escaping ([String: Any]) -> Void) {

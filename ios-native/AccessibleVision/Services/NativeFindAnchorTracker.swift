@@ -21,14 +21,19 @@ final class NativeFindTracker {
     private var token = ""
     private var seedFrameId = 0
     private var targetWorld: SIMD3<Float>?
+    private weak var trackingSession: ARSession?
+    private var targetAnchor: ARAnchor?
     private var armed = false
     private var lastTime: TimeInterval = 0
 
     func stop() {
+        if let anchor = targetAnchor { trackingSession?.remove(anchor: anchor) }
+        targetAnchor = nil
         token = ""; targetWorld = nil; armed = false; history.removeAll()
     }
 
-    func command(_ body: [String: Any]) {
+    func command(_ body: [String: Any], session: ARSession) {
+        trackingSession = session
         if body["type"] as? String == "stop" { stop(); return }
         guard let newToken = body["token"] as? String, !newToken.isEmpty else { return }
         if body["type"] as? String == "begin" { stop(); armed = true; token = newToken; return }
@@ -47,6 +52,12 @@ final class NativeFindTracker {
         let y = -(Float(p.y * frame.imageSize.height) - k.columns.2.y) * meters / k.columns.1.y
         let world = frame.transform * SIMD4<Float>(x, y, -meters, 1)
         targetWorld = SIMD3(world.x, world.y, world.z)
+        // ARKit keeps this landmark aligned when it refines its world map.
+        var transform = matrix_identity_float4x4
+        transform.columns.3 = world
+        let anchor = ARAnchor(name: "native-find-target", transform: transform)
+        targetAnchor = anchor
+        session.add(anchor: anchor)
     }
 
     func process(_ frame: ARFrame, packet: NativeVisionFramePacket?) {
@@ -61,6 +72,11 @@ final class NativeFindTracker {
                 grid: packet.depthGrid, columns: packet.depthGridWidth, rows: packet.depthGridHeight))
             history.removeAll { now - $0.time > 12 }
             if history.count > 40 { history.removeFirst(history.count-40) }
+        }
+        if let id = targetAnchor?.identifier,
+           let updated = frame.anchors.first(where: { $0.identifier == id }) {
+            let point = updated.transform.columns.3
+            targetWorld = SIMD3(point.x, point.y, point.z)
         }
         guard let target = targetWorld, now - lastTime >= 0.10 else { return }
         lastTime = now
