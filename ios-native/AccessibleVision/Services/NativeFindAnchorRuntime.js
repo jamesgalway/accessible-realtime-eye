@@ -150,7 +150,12 @@
     const centered=o.onScreen===true&&o.x>=0.40&&o.x<=0.60;
     const closeEnough=o.meters<=0.60;
     if((o.meters<=0.85&&centered)||closeEnough){if(speak(s,'reach'))s.phase='reach_speech';return;}
-    if(!['left','right'].includes(code))return;
+    if(!['left','right'].includes(code)){
+      // Once the target returns to the model's middle third, discard the old
+      // side latch so a small later wobble cannot revive a stale instruction.
+      if(code==='forward'&&['left','right'].includes(s.lastCode)){s.lastCode='';s.candidateCode='';}
+      return;
+    }
     if(s.candidateCode!==code){s.candidateCode=code;s.candidateAt=Date.now();return;}
     if(Date.now()-s.candidateAt>=500)speak(s,code);
   }
@@ -159,7 +164,7 @@
       token:`nf_${Date.now()}_${++counter}`,phase:'lock',seedFrame:0,anchorReady:false,observation:null,
       inFlight:false,lastModelFrame:0,retryAt:Date.now()+400,lastCode:'',lastSaid:0,speechGuardUntil:0};
     current=s;post({type:'begin',token:s.token});timer=setInterval(()=>tick(s),100);
-    log('started',{target:s.target,token:s.token,version:35,voice:'existing_model'});
+    log('started',{target:s.target,token:s.token,version:36,voice:'existing_model'});
   }
   document.addEventListener('click',event=>{
     const button=event.target?.closest?.('button'),id=button?.id||'';
