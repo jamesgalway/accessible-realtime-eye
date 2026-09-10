@@ -93,16 +93,24 @@
     const controller=new AbortController();s.abort=controller;const timeout=setTimeout(()=>controller.abort(),12000);
     log('model_request',{phase:'initial_lock',frameId:frame.frameId});
     try{
-      const response=await fetch('/api/native-find-check',{method:'POST',headers:{'Content-Type':'application/json'},signal:controller.signal,
-        body:JSON.stringify({version:1,token:s.token,phase:'lock',target:s.target,frameId:frame.frameId,imageDataUrl:frame.imageDataUrl})});
+      const response=await fetch('/api/find-object-check',{method:'POST',headers:{'Content-Type':'application/json'},signal:controller.signal,
+        body:JSON.stringify({target:s.target,frameCount:frame.frameId,reminderSessionId:s.reminder.reminderSessionId||'',
+          nativeFindHandStage:false,imageDataUrl:frame.imageDataUrl})});
       const r=await response.json();if(!alive(s))return;
       if(!response.ok||!r.ok)throw new Error(r.error||'recognition_failed');
-      if(r.token!==s.token||r.frameId!==frame.frameId||Date.now()-frame.capturedAtMs>11000)return;
-      if(!r.visible||!Array.isArray(r.box)){s.retryAt=Date.now()+1000;return;}
-      s.seedFrame=frame.frameId;s.initialMeters=frameDepth(frame,r.box);s.firstResult=r;
+      if(Number(r.frameCount)!==frame.frameId||Date.now()-frame.capturedAtMs>11000)return;
+      const x=Number(r.targetX),y=Number(r.targetY),confidence=Number(r.confidence||0);
+      if(r.visible!=='yes'||confidence<0.55||!Number.isFinite(x)||!Number.isFinite(y)
+        ||x<0||x>1||y<0||y>1){s.retryAt=Date.now()+700;return;}
+      const half=0.02;
+      const box=[Math.max(0,x-half),Math.max(0,y-half),Math.min(2*half,x+half,1-x+half),Math.min(2*half,y+half,1-y+half)];
+      const location=String(r.location||'');
+      const firstResult={...r,visible:true,confidence,box,speech:location,
+        requiresCrouch:/(?:地面|地板|脚边|台阶底)/.test(location)};
+      s.seedFrame=frame.frameId;s.initialMeters=frameDepth(frame,box);s.firstResult=firstResult;
       s.phase='approach';s.observation=null;
-      log('seed',{frameId:frame.frameId,box:r.box,initialMeters:s.initialMeters});
-      post({type:'seed',token:s.token,frameId:frame.frameId,box:r.box});announce(s);
+      log('seed',{frameId:frame.frameId,box,initialMeters:s.initialMeters,transport:'web_find_object'});
+      post({type:'seed',token:s.token,frameId:frame.frameId,box});announce(s);
     }catch(error){if(alive(s)){s.retryAt=Date.now()+1500;log('model_error',{reason:String(error.message).slice(0,150)});}}
     finally{clearTimeout(timeout);s.inFlight=false;if(s.abort===controller)s.abort=null;}
   }
@@ -138,7 +146,7 @@
     // distance, allow any on-screen target so a small horizontal seed error
     // cannot block hand/contact recognition after the user has arrived.
     const centered=o.onScreen===true&&o.x>=0.40&&o.x<=0.60;
-    const closeEnough=o.onScreen===true&&o.meters<=0.60;
+    const closeEnough=o.meters<=0.60;
     if((o.meters<=0.85&&centered)||closeEnough){if(speak(s,'reach'))s.phase='reach_speech';return;}
     if(!['left','right'].includes(code))return;
     if(s.candidateCode!==code){s.candidateCode=code;s.candidateAt=Date.now();return;}
@@ -149,7 +157,7 @@
       token:`nf_${Date.now()}_${++counter}`,phase:'lock',seedFrame:0,anchorReady:false,observation:null,
       inFlight:false,lastModelFrame:0,retryAt:Date.now()+400,lastCode:'',lastSaid:0,speechGuardUntil:0};
     current=s;post({type:'begin',token:s.token});timer=setInterval(()=>tick(s),100);
-    log('started',{target:s.target,token:s.token,version:32,voice:'existing_model'});
+    log('started',{target:s.target,token:s.token,version:33,voice:'existing_model'});
   }
   document.addEventListener('click',event=>{
     const button=event.target?.closest?.('button'),id=button?.id||'';
