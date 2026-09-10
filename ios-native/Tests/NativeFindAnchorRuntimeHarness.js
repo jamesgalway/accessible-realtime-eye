@@ -21,7 +21,7 @@ const click=id=>events.click({target:{closest:()=>({id})}});
  c.__accessibleVisionEnableRuntimeHooks();await drain();frame(1);
  click('start-aliyun-cheap-unified-visual-assistant');c.runGeminiFindObjectTick(reminder);assert.equal(originalTicks,1);
  click('start-aliyun-unified-visual-assistant');c.runGeminiFindObjectTick(reminder);now+=500;frame(2);interval();
- assert.equal(requests,1);const p=pending;
+ assert.equal(requests,1);assert.equal(spoken.length,0,'opening acknowledgement must not be preempted before a real miss');const p=pending;
  p.resolve({ok:true,json:async()=>({ok:true,frameCount:2,visible:'yes',confidence:0.9,targetX:0.5,targetY:0.5,location:'桌子上'})});await drain();
  now+=800;interval();
  assert.equal(announcements.length,1,'first announcement must not wait for tracker initialization');

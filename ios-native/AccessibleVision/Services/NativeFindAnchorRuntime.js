@@ -103,7 +103,7 @@
       if(Number(r.frameCount)!==frame.frameId||Date.now()-frame.capturedAtMs>11000)return;
       const x=Number(r.targetX),y=Number(r.targetY),confidence=Number(r.confidence||0);
       if(r.visible!=='yes'||confidence<0.55||!Number.isFinite(x)||!Number.isFinite(y)
-        ||x<0||x>1||y<0||y>1){s.retryAt=Date.now()+700;return;}
+        ||x<0||x>1||y<0||y>1){s.hasSearchMiss=true;s.retryAt=Date.now()+700;return;}
       const half=0.02;
       const box=[Math.max(0,x-half),Math.max(0,y-half),Math.min(2*half,x+half,1-x+half),Math.min(2*half,y+half,1-y+half)];
       const location=String(r.location||'');
@@ -127,7 +127,9 @@
     if(document.hidden)return;
     refreshAudio(s.reminder);
     if(s.phase==='legacy_hand')return;
-    if(!s.firstResult){recognize(s);speak(s,'search');return;}
+    // Let the opening acknowledgement finish. Only say "not found" after an
+    // actual recognition miss; a fast first hit goes straight to its location.
+    if(!s.firstResult){recognize(s);if(s.hasSearchMiss)speak(s,'search');return;}
     if(!s.announced){announce(s);return;}
     if(busy(s))return;
     if(s.phase==='reach_speech'){
@@ -162,9 +164,9 @@
   function begin(reminder){
     stop();reminder.nativeFindHandStage=false;const s={reminder,target:reminder.findTarget,task:reminder.findTaskSeq||0,
       token:`nf_${Date.now()}_${++counter}`,phase:'lock',seedFrame:0,anchorReady:false,observation:null,
-      inFlight:false,lastModelFrame:0,retryAt:Date.now()+400,lastCode:'',lastSaid:0,speechGuardUntil:0};
+      inFlight:false,lastModelFrame:0,retryAt:Date.now()+400,hasSearchMiss:false,lastCode:'',lastSaid:0,speechGuardUntil:0};
     current=s;post({type:'begin',token:s.token});timer=setInterval(()=>tick(s),100);
-    log('started',{target:s.target,token:s.token,version:36,voice:'existing_model'});
+    log('started',{target:s.target,token:s.token,version:37,voice:'existing_model'});
   }
   document.addEventListener('click',event=>{
     const button=event.target?.closest?.('button'),id=button?.id||'';
