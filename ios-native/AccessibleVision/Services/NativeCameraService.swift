@@ -60,9 +60,11 @@ final class NativeCameraService: NSObject, ObservableObject, ARSessionDelegate {
 
     private static let packetInterval: TimeInterval = 1.0 / 3.0
     private static let outputWidth: CGFloat = 512
-    private static let outputAspectRatio: CGFloat = 9.0 / 16.0
+    // Keep the wide camera's full portrait 3:4 field of view. A 9:16 crop
+    // discarded roughly one quarter of the horizontal scene before inference.
+    private static let outputAspectRatio: CGFloat = 3.0 / 4.0
     private static let depthGridWidth = 24
-    private static let depthGridHeight = 42
+    private static let depthGridHeight = 32
 
     override init() {
         super.init()

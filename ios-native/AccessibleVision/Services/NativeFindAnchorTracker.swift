@@ -25,6 +25,7 @@ final class NativeFindTracker {
     private var targetAnchor: ARAnchor?
     private var armed = false
     private var lastTime: TimeInterval = 0
+    private var viewportSize = CGSize(width: 3, height: 4)
 
     func stop() {
         if let anchor = targetAnchor { trackingSession?.remove(anchor: anchor) }
@@ -64,11 +65,13 @@ final class NativeFindTracker {
         guard armed else { return }
         let now = ProcessInfo.processInfo.systemUptime
         if let packet {
+            let packetViewport = CGSize(width: packet.width, height: packet.height)
+            viewportSize = packetViewport
             history.append(FrameGeometry(id: packet.frameId, time: frame.timestamp,
                 transform: frame.camera.transform, intrinsics: frame.camera.intrinsics,
                 imageSize: frame.camera.imageResolution,
                 imageTransform: frame.displayTransform(for: .portrait,
-                    viewportSize: CGSize(width: packet.width, height: packet.height)).inverted(),
+                    viewportSize: packetViewport).inverted(),
                 grid: packet.depthGrid, columns: packet.depthGridWidth, rows: packet.depthGridHeight))
             history.removeAll { now - $0.time > 12 }
             if history.count > 40 { history.removeFirst(history.count-40) }
@@ -88,7 +91,7 @@ final class NativeFindTracker {
         let cameraPoint = simd_inverse(frame.camera.transform) * SIMD4(target.x,target.y,target.z,1)
         let meters = simd_length(SIMD3(cameraPoint.x,cameraPoint.y,cameraPoint.z))
         guard meters.isFinite, meters > 0.10, meters < 12 else { emitInvalid("anchor_invalid"); return }
-        let viewport = CGSize(width:512,height:910)
+        let viewport = viewportSize
         let projected = frame.camera.projectPoint(target, orientation:.portrait, viewportSize:viewport)
         // projectPoint uses portrait screen axes, whereas raw AR camera x/y are sensor axes.
         // For targets behind the camera derive the shortest turn in portrait display space.
