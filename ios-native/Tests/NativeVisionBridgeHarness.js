@@ -139,11 +139,9 @@ function packet(frameId, meters, lidarAvailable = true) {
 }
 
 async function run() {
-  window.__accessibleVisionSetNativeMicrophoneEnabled(false);
-  window.__accessibleVisionSetNativeMicrophoneEnabled(false);
-  window.__accessibleVisionSetNativeMicrophoneEnabled(true);
+  assert.equal(typeof window.__accessibleVisionSetNativeMicrophoneEnabled, 'undefined');
   const microphoneModeMessages = nativeMessages.filter((message) => message.type === 'setNativeMicrophoneEnabled');
-  assert.deepEqual(microphoneModeMessages.map((message) => message.enabled), [false, true]);
+  assert.deepEqual(microphoneModeMessages, []);
 
   window.__accessibleVisionReceiveFrame(packet(1, 0.70));
   const combinedStream = await navigator.mediaDevices.getUserMedia({

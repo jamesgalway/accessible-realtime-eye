@@ -1,4 +1,3 @@
-import AVFoundation
 import SwiftUI
 import WebKit
 
@@ -105,7 +104,6 @@ struct GreenCloudWebView: UIViewRepresentable {
             find.stop()
             location.stop()
             camera.onFramePacket = nil
-            _ = setNativeMicrophoneEnabled(true)
             webView = nil
             webReady = false
             latestPacket = nil
@@ -113,7 +111,6 @@ struct GreenCloudWebView: UIViewRepresentable {
 
         func releaseMediaResources(in webView: WKWebView) {
             onMediaCaptureReleased()
-            _ = setNativeMicrophoneEnabled(true)
             webView.pauseAllMediaPlayback {}
             webView.evaluateJavaScript("""
                 window.__accessibleVisionReleaseMedia?.();
@@ -168,42 +165,11 @@ struct GreenCloudWebView: UIViewRepresentable {
             let body = message.body as? [String: Any]
             let type = String(body?["type"] as? String ?? "")
             if type == "requestNativeMediaStart" {
-                _ = setNativeMicrophoneEnabled(true)
                 onMediaCaptureRequested()
-            } else if type == "setNativeMicrophoneEnabled" {
-                let enabled = body?["enabled"] as? Bool ?? true
-                let configured = setNativeMicrophoneEnabled(enabled)
-                webView?.evaluateJavaScript("""
-                    window.logClientEvent?.('native_ios.microphone_mode', {
-                      enabled: \(enabled),
-                      configured: \(configured)
-                    });
-                    """)
             } else if type == "nativeMediaReleased" {
                 onMediaCaptureReleased()
-                _ = setNativeMicrophoneEnabled(true)
             } else if type == "fallbackWebCamera" {
                 camera.stop()
-            }
-        }
-
-        private func setNativeMicrophoneEnabled(_ enabled: Bool) -> Bool {
-            let session = AVAudioSession.sharedInstance()
-            do {
-                try? session.setActive(false, options: [.notifyOthersOnDeactivation])
-                if enabled {
-                    try session.setCategory(
-                        .playAndRecord,
-                        mode: .voiceChat,
-                        options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP]
-                    )
-                } else {
-                    try session.setCategory(.playback, mode: .default, options: [])
-                }
-                try session.setActive(true)
-                return true
-            } catch {
-                return false
             }
         }
 

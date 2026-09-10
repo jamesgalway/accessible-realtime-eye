@@ -19,8 +19,7 @@ enum NativeVisionBridgeScript {
         wrappedTracks: new WeakSet(),
         findSessions: new Map(),
         lastNativeDepthAt: 0,
-        runtimeHooksInstalled: false,
-        nativeMicrophoneEnabled: null
+        runtimeHooksInstalled: false
       };
       state.canvas.width = 288;
       state.canvas.height = 512;
@@ -30,16 +29,6 @@ enum NativeVisionBridgeScript {
         try {
           window.webkit?.messageHandlers?.nativeVision?.postMessage(message);
         } catch (_) {}
-      };
-
-      window.__accessibleVisionSetNativeMicrophoneEnabled = (enabled) => {
-        const next = enabled !== false;
-        if (state.nativeMicrophoneEnabled === next) return;
-        state.nativeMicrophoneEnabled = next;
-        postNative({ type: 'setNativeMicrophoneEnabled', enabled: next });
-        if (typeof window.logClientEvent === 'function') {
-          window.logClientEvent('native_ios.microphone_mode_requested', { enabled: next });
-        }
       };
 
       const rememberFrame = (packet) => {
