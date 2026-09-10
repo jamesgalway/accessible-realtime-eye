@@ -167,10 +167,39 @@ struct GreenCloudWebView: UIViewRepresentable {
             let type = String(body?["type"] as? String ?? "")
             if type == "requestNativeMediaStart" {
                 onMediaCaptureRequested()
+            } else if type == "setNativeMicrophoneEnabled" {
+                let enabled = body?["enabled"] as? Bool ?? true
+                let configured = setNativeMicrophoneEnabled(enabled)
+                webView?.evaluateJavaScript("""
+                    window.logClientEvent?.('native_ios.microphone_mode', {
+                      enabled: \(enabled),
+                      configured: \(configured)
+                    });
+                    """)
             } else if type == "nativeMediaReleased" {
                 onMediaCaptureReleased()
             } else if type == "fallbackWebCamera" {
                 camera.stop()
+            }
+        }
+
+        private func setNativeMicrophoneEnabled(_ enabled: Bool) -> Bool {
+            let session = AVAudioSession.sharedInstance()
+            do {
+                try? session.setActive(false, options: [.notifyOthersOnDeactivation])
+                if enabled {
+                    try session.setCategory(
+                        .playAndRecord,
+                        mode: .voiceChat,
+                        options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP]
+                    )
+                } else {
+                    try session.setCategory(.playback, mode: .default, options: [])
+                }
+                try session.setActive(true)
+                return true
+            } catch {
+                return false
             }
         }
 

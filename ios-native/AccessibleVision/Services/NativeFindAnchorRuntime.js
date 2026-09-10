@@ -8,7 +8,7 @@
   const alive=s=>current===s&&appState.geminiReminder===s.reminder&&!s.reminder.stopping
     &&s.reminder.findTarget===s.target&&(s.reminder.findTaskSeq||0)===s.task;
   const phrases={search:'还没找到，请慢慢移动镜头。',left:'往左一点。',right:'往右一点。',
-    forward:'方向对了。',reach:'到了，可以伸手。'};
+    forward:'方向对了。',reach:'到了，可以伸手。',reachLow:'到了，请蹲下伸手。'};
 
   // Recover only an expired player latch. A completed model response alone does
   // not mean queued audio has finished; respect the actual audio clock and tail.
@@ -44,9 +44,11 @@
     if(!alive(s)||busy(s))return false;
     const now=Date.now(),repeat=code==='search'?4000:3500;
     if(s.lastCode===code&&now-s.lastSaid<repeat)return false;
-    if(!sendGeminiLiveEvent({type:'say',text:phrases[code],deliveryMode:'guidance'}))return false;
+    const text=code==='reach'&&s.firstResult?.requiresCrouch?phrases.reachLow:phrases[code];
+    if(!sendGeminiLiveEvent({type:'say',text,deliveryMode:'guidance'}))return false;
     s.lastCode=code;s.lastSaid=now;s.speechGuardUntil=now+700;
-    log('model_guidance',{code,phase:s.phase,meters:s.observation?.meters,source:'lidar_world_anchor'});
+    log('model_guidance',{code,phase:s.phase,meters:s.observation?.meters,
+      requiresCrouch:code==='reach'&&s.firstResult?.requiresCrouch===true,source:'lidar_world_anchor'});
     return true;
   }
   function announce(s){
@@ -137,11 +139,11 @@
     if(Date.now()-s.candidateAt>=500)speak(s,code);
   }
   function begin(reminder){
-    stop();const s={reminder,target:reminder.findTarget,task:reminder.findTaskSeq||0,
+    stop();reminder.nativeFindHandStage=false;const s={reminder,target:reminder.findTarget,task:reminder.findTaskSeq||0,
       token:`nf_${Date.now()}_${++counter}`,phase:'lock',seedFrame:0,anchorReady:false,observation:null,
       inFlight:false,lastModelFrame:0,retryAt:Date.now()+400,lastCode:'',lastSaid:0,speechGuardUntil:0};
     current=s;post({type:'begin',token:s.token});timer=setInterval(()=>tick(s),100);
-    log('started',{target:s.target,token:s.token,version:26,voice:'existing_model'});
+    log('started',{target:s.target,token:s.token,version:27,voice:'existing_model'});
   }
   document.addEventListener('click',event=>{
     const button=event.target?.closest?.('button'),id=button?.id||'';

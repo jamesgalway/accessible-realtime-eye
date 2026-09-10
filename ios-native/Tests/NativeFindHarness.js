@@ -19,8 +19,10 @@ assert.equal(P.direction({...o,handX:0.5,handY:0.2},true,true),'hand_down');
 assert.equal(P.direction({...o,handX:0.5,handY:0.5},true,true),'hold');
 assert.equal(P.fresh(o,1600),false);assert.equal(P.fresh(o,1200),true);
 assert.equal(P.fresh(o,900),false);
-const good={visible:true,confidence:0.9,box:[0.3,0.3,0.2,0.2],speech:'杯子在桌上。',canApproach:true};
+const good={visible:true,confidence:0.9,box:[0.3,0.3,0.2,0.2],speech:'杯子在桌上。',canApproach:true,requiresCrouch:false};
 assert.equal(parseResult(JSON.stringify(good)).visible,true);
+assert.equal(parseResult(JSON.stringify(good)).requiresCrouch,false);
+assert.equal(parseResult(JSON.stringify({...good,requiresCrouch:true})).requiresCrouch,true);
 for(const box of [[0.9,0.3,0.2,0.2],[0.3,0.3,0,0.2],['0.3',0.3,0.2,0.2],null]) {
   assert.equal(parseResult(JSON.stringify({...good,box})).visible,false);
 }

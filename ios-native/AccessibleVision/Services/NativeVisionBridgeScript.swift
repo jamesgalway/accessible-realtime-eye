@@ -19,7 +19,8 @@ enum NativeVisionBridgeScript {
         wrappedTracks: new WeakSet(),
         findSessions: new Map(),
         lastNativeDepthAt: 0,
-        runtimeHooksInstalled: false
+        runtimeHooksInstalled: false,
+        nativeMicrophoneEnabled: null
       };
       state.canvas.width = 288;
       state.canvas.height = 512;
@@ -29,6 +30,16 @@ enum NativeVisionBridgeScript {
         try {
           window.webkit?.messageHandlers?.nativeVision?.postMessage(message);
         } catch (_) {}
+      };
+
+      window.__accessibleVisionSetNativeMicrophoneEnabled = (enabled) => {
+        const next = enabled !== false;
+        if (state.nativeMicrophoneEnabled === next) return;
+        state.nativeMicrophoneEnabled = next;
+        postNative({ type: 'setNativeMicrophoneEnabled', enabled: next });
+        if (typeof window.logClientEvent === 'function') {
+          window.logClientEvent('native_ios.microphone_mode_requested', { enabled: next });
+        }
       };
 
       const rememberFrame = (packet) => {
@@ -274,26 +285,81 @@ enum NativeVisionBridgeScript {
         right: 'walk_right'
       }[String(zone || '')] || '');
 
+      const findHandDirectionForApproach = (status) => ({
+        walk_left: 'move_left',
+        walk_forward: 'move_forward',
+        walk_right: 'move_right'
+      }[String(status || '')] || '');
+
       const applyNativeFindDepth = (result, packet, body) => {
-        if (!result || !packet?.lidarAvailable) return result;
-        if (String(result.visible || '') !== 'yes' || String(result.hand || '') !== 'missing') {
-          return result;
-        }
+        if (!result) return result;
         const status = String(result.status || 'uncertain');
+        const visible = String(result.visible || '');
+        const hand = String(result.hand || '');
+        const frameCount = Number(body?.frameCount || 0);
+        const key = `${String(body?.reminderSessionId || '')}:${String(body?.target || '')}`;
+        if (frameCount <= 1) state.findSessions.delete(key);
+        const previous = state.findSessions.get(key) || { near: false };
+        if (previous.near) {
+          const handStatus = hand === 'missing'
+            ? 'hand_missing'
+            : hand === 'visible'
+              ? findHandDirectionForApproach(status)
+              : '';
+          if (!handStatus) return result;
+          const adjusted = {
+            ...result,
+            status: handStatus,
+            nativeLidar: {
+              available: Boolean(packet?.lidarAvailable),
+              source: 'apple_lidar',
+              targetDepthM: previous.targetDepthM ?? null,
+              confidence: previous.confidence ?? null,
+              sampleCount: previous.sampleCount ?? 0,
+              nearPhaseLatched: true,
+              nearThresholdM: 0.85,
+              originalStatus: status,
+              decision: 'keep_hand_phase',
+              frameId: packet?.frameId ?? null
+            }
+          };
+          if (typeof window.logClientEvent === 'function') {
+            window.logClientEvent('native_lidar.find_decision', {
+              target: String(body?.target || ''),
+              frameCount,
+              originalStatus: status,
+              status: adjusted.status,
+              hand,
+              nearPhaseLatched: true,
+              nativeFrameId: packet?.frameId ?? null
+            });
+          }
+          return adjusted;
+        }
+        if (!packet?.lidarAvailable || visible !== 'yes') return result;
+        const sample = sampleTargetDepth(packet, result.targetX, result.targetY);
+        if (!sample) return result;
+        const near = sample.meters <= 0.85;
+        state.findSessions.set(key, {
+          near,
+          targetDepthM: Number(sample.meters.toFixed(3)),
+          confidence: Number(sample.confidence.toFixed(3)),
+          sampleCount: sample.sampleCount,
+          updatedAt: Date.now()
+        });
         const eligible = new Set([
           'walk_left', 'walk_right', 'walk_forward', 'hand_missing', 'target_visible', 'uncertain'
         ]);
-        if (!eligible.has(status)) return result;
-        const sample = sampleTargetDepth(packet, result.targetX, result.targetY);
-        if (!sample) return result;
-        const key = `${String(body?.reminderSessionId || '')}:${String(body?.target || '')}`;
-        const previous = state.findSessions.get(key) || { near: false };
-        let near = Boolean(previous.near);
-        if (near && sample.meters >= 1.10) near = false;
-        if (!near && sample.meters <= 0.85) near = true;
-        state.findSessions.set(key, { near, updatedAt: Date.now() });
         const direction = findDirectionForZone(result.zone);
-        const replacementStatus = near ? 'hand_missing' : direction;
+        const replacementStatus = near
+          ? hand === 'missing'
+            ? 'hand_missing'
+            : hand === 'visible'
+              ? findHandDirectionForApproach(status)
+              : ''
+          : hand === 'missing' && eligible.has(status)
+            ? direction
+            : '';
         if (!replacementStatus) return result;
         const adjusted = {
           ...result,
@@ -306,7 +372,6 @@ enum NativeVisionBridgeScript {
             sampleCount: sample.sampleCount,
             nearPhaseLatched: near,
             nearThresholdM: 0.85,
-            releaseThresholdM: 1.10,
             originalStatus: status,
             decision: near ? 'allow_hand_phase' : 'keep_approach_phase',
             frameId: packet.frameId

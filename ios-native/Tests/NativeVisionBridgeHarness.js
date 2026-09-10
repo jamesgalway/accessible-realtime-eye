@@ -139,6 +139,12 @@ function packet(frameId, meters, lidarAvailable = true) {
 }
 
 async function run() {
+  window.__accessibleVisionSetNativeMicrophoneEnabled(false);
+  window.__accessibleVisionSetNativeMicrophoneEnabled(false);
+  window.__accessibleVisionSetNativeMicrophoneEnabled(true);
+  const microphoneModeMessages = nativeMessages.filter((message) => message.type === 'setNativeMicrophoneEnabled');
+  assert.deepEqual(microphoneModeMessages.map((message) => message.enabled), [false, true]);
+
   window.__accessibleVisionReceiveFrame(packet(1, 0.70));
   const combinedStream = await navigator.mediaDevices.getUserMedia({
     audio: true,
@@ -181,11 +187,11 @@ async function run() {
   const farImage = captureReminderFrame({ maxWidth: 512, quality: 0.55 });
   findResult = {
     ok: true,
-    status: 'hand_missing',
+    status: 'walk_forward',
     visible: 'yes',
-    hand: 'missing',
-    zone: 'right',
-    targetX: 0.82,
+    hand: 'visible',
+    zone: 'center',
+    targetX: 0.5,
     targetY: 0.5,
     confidence: 0.9
   };
@@ -200,10 +206,49 @@ async function run() {
     })
   });
   result = await response.json();
-  assert.equal(result.status, 'walk_right');
-  assert.equal(result.nativeLidar.decision, 'keep_approach_phase');
+  assert.equal(result.status, 'move_forward');
+  assert.equal(result.nativeLidar.decision, 'keep_hand_phase');
+  assert.equal(result.nativeLidar.nearPhaseLatched, true);
   assert.equal(result.nativeLidar.frameId, 2);
   assert.equal(findRequestBodies.at(-1).nativeFindDepthPolicy, 'apple_lidar_only_v1');
+
+  findResult = {
+    ok: true,
+    status: 'walk_right',
+    visible: 'yes',
+    hand: 'missing',
+    zone: 'right',
+    targetX: 0.82,
+    targetY: 0.5,
+    confidence: 0.9
+  };
+  response = await fetch('/api/find-object-check', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      imageDataUrl: farImage,
+      target: 'test target',
+      frameCount: 3,
+      reminderSessionId: 'test-session'
+    })
+  });
+  result = await response.json();
+  assert.equal(result.status, 'hand_missing');
+  assert.equal(result.nativeLidar.decision, 'keep_hand_phase');
+
+  response = await fetch('/api/find-object-check', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      imageDataUrl: farImage,
+      target: 'test target',
+      frameCount: 1,
+      reminderSessionId: 'test-session'
+    })
+  });
+  result = await response.json();
+  assert.equal(result.status, 'walk_right');
+  assert.equal(result.nativeLidar.decision, 'keep_approach_phase');
 
   window.__ACCESSIBLE_VISION_BACKEND__ = 'aliyun';
   await fetch('/api/find-object-check', {
@@ -254,7 +299,7 @@ async function run() {
   assert.ok(combinedStream.getTracks().every((track) => track.readyState === 'ended'));
   assert.ok(nativeMessages.some((message) => message.type === 'nativeMediaReleased'));
 
-  console.log('Native vision bridge harness: 25/25 PASS');
+  console.log('Native vision bridge harness: hand phase latch PASS');
 }
 
 run().catch((error) => {
