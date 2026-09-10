@@ -105,6 +105,7 @@ struct GreenCloudWebView: UIViewRepresentable {
             find.stop()
             location.stop()
             camera.onFramePacket = nil
+            _ = setNativeMicrophoneEnabled(true)
             webView = nil
             webReady = false
             latestPacket = nil
@@ -112,6 +113,7 @@ struct GreenCloudWebView: UIViewRepresentable {
 
         func releaseMediaResources(in webView: WKWebView) {
             onMediaCaptureReleased()
+            _ = setNativeMicrophoneEnabled(true)
             webView.pauseAllMediaPlayback {}
             webView.evaluateJavaScript("""
                 window.__accessibleVisionReleaseMedia?.();
@@ -166,6 +168,7 @@ struct GreenCloudWebView: UIViewRepresentable {
             let body = message.body as? [String: Any]
             let type = String(body?["type"] as? String ?? "")
             if type == "requestNativeMediaStart" {
+                _ = setNativeMicrophoneEnabled(true)
                 onMediaCaptureRequested()
             } else if type == "setNativeMicrophoneEnabled" {
                 let enabled = body?["enabled"] as? Bool ?? true
@@ -178,6 +181,7 @@ struct GreenCloudWebView: UIViewRepresentable {
                     """)
             } else if type == "nativeMediaReleased" {
                 onMediaCaptureReleased()
+                _ = setNativeMicrophoneEnabled(true)
             } else if type == "fallbackWebCamera" {
                 camera.stop()
             }
