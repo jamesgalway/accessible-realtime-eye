@@ -42,7 +42,9 @@
   }
   function speak(s,code){
     if(!alive(s)||busy(s))return false;
-    const now=Date.now(),repeat=code==='search'?4000:3500;
+    // Model speech reaches the user a few seconds after this decision. Leave
+    // enough time to act before another identical lateral command is queued.
+    const now=Date.now(),repeat=code==='search'?4000:6500;
     if(s.lastCode===code&&now-s.lastSaid<repeat)return false;
     const text=code==='reach'&&s.firstResult?.requiresCrouch?phrases.reachLow:phrases[code];
     if(!sendGeminiLiveEvent({type:'say',text,deliveryMode:'guidance'}))return false;
@@ -157,7 +159,7 @@
       token:`nf_${Date.now()}_${++counter}`,phase:'lock',seedFrame:0,anchorReady:false,observation:null,
       inFlight:false,lastModelFrame:0,retryAt:Date.now()+400,lastCode:'',lastSaid:0,speechGuardUntil:0};
     current=s;post({type:'begin',token:s.token});timer=setInterval(()=>tick(s),100);
-    log('started',{target:s.target,token:s.token,version:33,voice:'existing_model'});
+    log('started',{target:s.target,token:s.token,version:35,voice:'existing_model'});
   }
   document.addEventListener('click',event=>{
     const button=event.target?.closest?.('button'),id=button?.id||'';

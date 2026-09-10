@@ -2,8 +2,11 @@
 // Pure local decisions. No model status or cached model direction enters this policy.
 const NativeFindPolicy = {
   approach(o, previous = '') {
-    if (o.x < (previous === 'left' ? 0.45 : 0.40)) return 'left';
-    if (o.x > (previous === 'right' ? 0.55 : 0.60)) return 'right';
+    // Match the web model's horizontal thirds. The former 40%-60% center
+    // band called a mild 37% offset "left" and held that instruction until
+    // 45%, which was too aggressive once model-voice latency was included.
+    if (o.x < (previous === 'left' ? 0.38 : 1 / 3)) return 'left';
+    if (o.x > (previous === 'right' ? 0.62 : 2 / 3)) return 'right';
     if (o.y < 0) return 'aim_up';
     if (o.y > 1) return 'aim_down';
     return 'forward';
@@ -21,8 +24,8 @@ const NativeFindPolicy = {
       return 'hold';
     }
     if (o.meters <= 0.85) return 'stop';
-    if (o.x < (previous === 'left' ? 0.46 : 0.40)) return 'left';
-    if (o.x > (previous === 'right' ? 0.54 : 0.60)) return 'right';
+    if (o.x < (previous === 'left' ? 0.38 : 1 / 3)) return 'left';
+    if (o.x > (previous === 'right' ? 0.62 : 2 / 3)) return 'right';
     return canApproach ? 'forward' : 'aligned';
   },
   fresh(observation, now) { return observation?.valid === true && now - observation.at < 500 && now >= observation.at; },
