@@ -2,8 +2,8 @@
 // Pure local decisions. No model status or cached model direction enters this policy.
 const NativeFindPolicy = {
   approach(o, previous = '') {
-    if (o.x < (previous === 'left' ? 0.40 : 1/3)) return 'left';
-    if (o.x > (previous === 'right' ? 0.60 : 2/3)) return 'right';
+    if (o.x < (previous === 'left' ? 0.45 : 0.40)) return 'left';
+    if (o.x > (previous === 'right' ? 0.55 : 0.60)) return 'right';
     if (o.y < 0) return 'aim_up';
     if (o.y > 1) return 'aim_down';
     return 'forward';

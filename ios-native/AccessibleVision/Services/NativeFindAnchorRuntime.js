@@ -132,8 +132,11 @@
     if(!NativeFindPolicy.fresh(o,Date.now()))return;
     // Radial world distance works when the phone points away as well as on-screen.
     // Reach notification always precedes optional direction speech.
-    if(o.meters<=0.85){if(speak(s,'reach'))s.phase='reach_speech';return;}
     const code=NativeFindPolicy.approach(o,s.lastCode);
+    // Hand guidance needs the target in the camera. Distance alone must not
+    // announce reach while the phone is still pointed beside the target.
+    const centered=o.onScreen===true&&o.x>=0.40&&o.x<=0.60;
+    if(o.meters<=0.85&&centered){if(speak(s,'reach'))s.phase='reach_speech';return;}
     if(!['left','right'].includes(code))return;
     if(s.candidateCode!==code){s.candidateCode=code;s.candidateAt=Date.now();return;}
     if(Date.now()-s.candidateAt>=500)speak(s,code);
@@ -143,7 +146,7 @@
       token:`nf_${Date.now()}_${++counter}`,phase:'lock',seedFrame:0,anchorReady:false,observation:null,
       inFlight:false,lastModelFrame:0,retryAt:Date.now()+400,lastCode:'',lastSaid:0,speechGuardUntil:0};
     current=s;post({type:'begin',token:s.token});timer=setInterval(()=>tick(s),100);
-    log('started',{target:s.target,token:s.token,version:27,voice:'existing_model'});
+    log('started',{target:s.target,token:s.token,version:28,voice:'existing_model'});
   }
   document.addEventListener('click',event=>{
     const button=event.target?.closest?.('button'),id=button?.id||'';
