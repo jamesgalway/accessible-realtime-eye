@@ -63,8 +63,9 @@ final class NativeCameraService: NSObject, ObservableObject, ARSessionDelegate {
     // Keep the wide camera's full portrait 3:4 field of view. A 9:16 crop
     // discarded roughly one quarter of the horizontal scene before inference.
     private static let outputAspectRatio: CGFloat = 3.0 / 4.0
-    private static let depthGridWidth = 24
-    private static let depthGridHeight = 32
+    // Preserve the previous angular depth density across the wider image.
+    private static let depthGridWidth = 32
+    private static let depthGridHeight = 42
 
     override init() {
         super.init()
