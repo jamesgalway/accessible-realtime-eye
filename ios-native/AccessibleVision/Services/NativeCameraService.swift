@@ -5,6 +5,30 @@ import Foundation
 import ImageIO
 import UIKit
 
+enum NativePortraitGeometry {
+    // Match the JPEG's explicit clockwise rotation and centered portrait crop.
+    // The returned transform maps normalized AR captured-image coordinates to
+    // normalized coordinates in the exact portrait image sent to the model.
+    static func imageToPortraitTransform(imageSize: CGSize, viewportSize: CGSize) -> CGAffineTransform {
+        guard imageSize.width > 0, imageSize.height > 0,
+              viewportSize.width > 0, viewportSize.height > 0 else { return .identity }
+        let portraitWidth = imageSize.height
+        let portraitHeight = imageSize.width
+        let targetAspect = viewportSize.width / viewportSize.height
+        let cropWidth = min(portraitWidth, portraitHeight * targetAspect)
+        let cropScale = cropWidth / portraitWidth
+        let cropOrigin = (portraitWidth - cropWidth) / (2 * portraitWidth)
+        return CGAffineTransform(
+            a: 0,
+            b: 1,
+            c: -1 / cropScale,
+            d: 0,
+            tx: (1 - cropOrigin) / cropScale,
+            ty: 0
+        )
+    }
+}
+
 struct NativeVisionFramePacket: Encodable {
     let frameId: Int
     let capturedAtMs: Int64
@@ -59,7 +83,10 @@ final class NativeCameraService: NSObject, ObservableObject, ARSessionDelegate {
     private var nextFrameId = 1
 
     private static let packetInterval: TimeInterval = 1.0 / 3.0
-    private static let outputWidth: CGFloat = 512
+    // The full 3:4 field makes small objects occupy fewer pixels than the old
+    // narrow crop. Keep the wider view but restore enough angular detail for
+    // reliable first-lock recognition.
+    private static let outputWidth: CGFloat = 768
     // Keep the wide camera's full portrait 3:4 field of view. A 9:16 crop
     // discarded roughly one quarter of the horizontal scene before inference.
     private static let outputAspectRatio: CGFloat = 3.0 / 4.0
@@ -321,8 +348,8 @@ final class NativeCameraService: NSObject, ObservableObject, ARSessionDelegate {
         guard let depth = frame.smoothedSceneDepth ?? frame.sceneDepth else {
             return Array(repeating: nil, count: columns * rows)
         }
-        let imageTransform = frame.displayTransform(
-            for: .portrait,
+        let imageTransform = NativePortraitGeometry.imageToPortraitTransform(
+            imageSize: frame.camera.imageResolution,
             viewportSize: viewportSize
         ).inverted()
         return Self.withLockedDepth(depth) { locked in

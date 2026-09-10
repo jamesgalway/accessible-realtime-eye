@@ -47,7 +47,8 @@
     const text=code==='reach'&&s.firstResult?.requiresCrouch?phrases.reachLow:phrases[code];
     if(!sendGeminiLiveEvent({type:'say',text,deliveryMode:'guidance'}))return false;
     s.lastCode=code;s.lastSaid=now;s.speechGuardUntil=now+700;
-    log('model_guidance',{code,phase:s.phase,meters:s.observation?.meters,
+    log('model_guidance',{code,phase:s.phase,meters:s.observation?.meters,x:s.observation?.x,
+      y:s.observation?.y,onScreen:s.observation?.onScreen,
       requiresCrouch:code==='reach'&&s.firstResult?.requiresCrouch===true,source:'lidar_world_anchor'});
     return true;
   }
@@ -133,10 +134,12 @@
     // Radial world distance works when the phone points away as well as on-screen.
     // Reach notification always precedes optional direction speech.
     const code=NativeFindPolicy.approach(o,s.lastCode);
-    // Hand guidance needs the target in the camera. Distance alone must not
-    // announce reach while the phone is still pointed beside the target.
+    // Prefer a centered handoff from normal reach distance. At a stricter
+    // distance, allow any on-screen target so a small horizontal seed error
+    // cannot block hand/contact recognition after the user has arrived.
     const centered=o.onScreen===true&&o.x>=0.40&&o.x<=0.60;
-    if(o.meters<=0.85&&centered){if(speak(s,'reach'))s.phase='reach_speech';return;}
+    const closeEnough=o.onScreen===true&&o.meters<=0.60;
+    if((o.meters<=0.85&&centered)||closeEnough){if(speak(s,'reach'))s.phase='reach_speech';return;}
     if(!['left','right'].includes(code))return;
     if(s.candidateCode!==code){s.candidateCode=code;s.candidateAt=Date.now();return;}
     if(Date.now()-s.candidateAt>=500)speak(s,code);
@@ -146,7 +149,7 @@
       token:`nf_${Date.now()}_${++counter}`,phase:'lock',seedFrame:0,anchorReady:false,observation:null,
       inFlight:false,lastModelFrame:0,retryAt:Date.now()+400,lastCode:'',lastSaid:0,speechGuardUntil:0};
     current=s;post({type:'begin',token:s.token});timer=setInterval(()=>tick(s),100);
-    log('started',{target:s.target,token:s.token,version:28,voice:'existing_model'});
+    log('started',{target:s.target,token:s.token,version:32,voice:'existing_model'});
   }
   document.addEventListener('click',event=>{
     const button=event.target?.closest?.('button'),id=button?.id||'';

@@ -70,8 +70,10 @@ final class NativeFindTracker {
             history.append(FrameGeometry(id: packet.frameId, time: frame.timestamp,
                 transform: frame.camera.transform, intrinsics: frame.camera.intrinsics,
                 imageSize: frame.camera.imageResolution,
-                imageTransform: frame.displayTransform(for: .portrait,
-                    viewportSize: packetViewport).inverted(),
+                imageTransform: NativePortraitGeometry.imageToPortraitTransform(
+                    imageSize: frame.camera.imageResolution,
+                    viewportSize: packetViewport
+                ).inverted(),
                 grid: packet.depthGrid, columns: packet.depthGridWidth, rows: packet.depthGridHeight))
             history.removeAll { now - $0.time > 12 }
             if history.count > 40 { history.removeFirst(history.count-40) }
@@ -91,15 +93,24 @@ final class NativeFindTracker {
         let cameraPoint = simd_inverse(frame.camera.transform) * SIMD4(target.x,target.y,target.z,1)
         let meters = simd_length(SIMD3(cameraPoint.x,cameraPoint.y,cameraPoint.z))
         guard meters.isFinite, meters > 0.10, meters < 12 else { emitInvalid("anchor_invalid"); return }
-        let viewport = viewportSize
-        let projected = frame.camera.projectPoint(target, orientation:.portrait, viewportSize:viewport)
-        // projectPoint uses portrait screen axes, whereas raw AR camera x/y are sensor axes.
-        // For targets behind the camera derive the shortest turn in portrait display space.
         let view = frame.camera.viewMatrix(for: .portrait) * SIMD4(target.x,target.y,target.z,1)
         let yaw = atan2(view.x, -view.z)
-        let inFront = view.z < -0.05
-        let x = inFront ? projected.x/viewport.width : (yaw >= 0 ? 1.2 : -0.2)
-        let y = inFront ? projected.y/viewport.height : 0.5
+        let inFront = cameraPoint.z < -0.05
+        let depth = -cameraPoint.z
+        let imageSize = frame.camera.imageResolution
+        let intrinsics = frame.camera.intrinsics
+        let rawPoint = CGPoint(
+            x: CGFloat((intrinsics.columns.0.x * cameraPoint.x / depth + intrinsics.columns.2.x) / Float(imageSize.width)),
+            y: CGFloat((intrinsics.columns.2.y - intrinsics.columns.1.y * cameraPoint.y / depth) / Float(imageSize.height))
+        )
+        let portraitPoint = rawPoint.applying(NativePortraitGeometry.imageToPortraitTransform(
+            imageSize: imageSize,
+            viewportSize: viewportSize
+        ))
+        // Behind-camera turns retain ARKit's portrait yaw sign. In front, use
+        // the exact same explicit image transform as JPEG and depth sampling.
+        let x = inFront ? portraitPoint.x : (yaw >= 0 ? 1.2 : -0.2)
+        let y = inFront ? portraitPoint.y : 0.5
         let onScreen = inFront && x >= 0 && x <= 1 && y >= 0 && y <= 1
         let captureAt = Date().timeIntervalSince1970 * 1000 - (now-frame.timestamp)*1000
         onUpdate?(["token":token,"seedFrameId":seedFrameId,"valid":true,
