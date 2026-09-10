@@ -115,6 +115,8 @@ final class NativeFindTracker {
         let captureAt = Date().timeIntervalSince1970 * 1000 - (now-frame.timestamp)*1000
         onUpdate?(["token":token,"seedFrameId":seedFrameId,"valid":true,
             "x":x,"y":y,"meters":meters,"onScreen":onScreen,
+            "targetWorld":[target.x,target.y,target.z],
+            "cameraWorld":[frame.camera.transform.columns.3.x,frame.camera.transform.columns.3.y,frame.camera.transform.columns.3.z],
             "source":"lidar_world_anchor","at":captureAt])
     }
 

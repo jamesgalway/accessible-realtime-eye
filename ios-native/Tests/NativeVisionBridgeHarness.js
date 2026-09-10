@@ -210,6 +210,17 @@ async function run() {
   assert.equal(result.nativeLidar.frameId, 2);
   assert.equal(findRequestBodies.at(-1).nativeFindDepthPolicy, 'apple_lidar_only_v1');
 
+  // Anchor seeding owns the recognition frame. An unrelated latest near-depth
+  // packet must not replace the model's first result with hand-stage guidance.
+  response = await fetch('/api/find-object-check', {
+    method: 'POST',
+    body: JSON.stringify({imageDataUrl:'data:image/jpeg;base64,seed-frame',target:'anchor target',
+      frameCount:44,reminderSessionId:'anchor-session',nativeFindAnchorSeed:true})
+  });
+  result = await response.json();
+  assert.deepEqual(result, findResult);
+  assert.equal(result.nativeLidar, undefined);
+
   findResult = {
     ok: true,
     status: 'walk_right',

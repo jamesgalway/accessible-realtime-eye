@@ -468,6 +468,9 @@ enum NativeVisionBridgeScript {
 
         const response = await originalFetch(input, requestInit);
         if (!findPaths.has(path) || !response.ok || !body) return response;
+        // The anchor runtime retains the exact recognition frame and owns its
+        // depth conversion. Never apply the latest frame's depth to that result.
+        if (body.nativeFindAnchorSeed === true) return response;
         try {
           const result = await response.clone().json();
           const frameId = frameIdForCapture(body.imageDataUrl);

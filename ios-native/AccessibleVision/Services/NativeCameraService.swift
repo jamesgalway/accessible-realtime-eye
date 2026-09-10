@@ -245,7 +245,7 @@ final class NativeCameraService: NSObject, ObservableObject, ARSessionDelegate {
     }
 
     private func makeFramePacket(from frame: ARFrame, hasDepth: Bool) -> NativeVisionFramePacket? {
-        guard let jpeg = makePortraitJPEG(from: frame, maxWidth: Self.outputWidth, quality: 0.60) else {
+        guard let jpeg = makePortraitJPEG(from: frame, maxWidth: Self.outputWidth, quality: 0.78) else {
             return nil
         }
         let frameId = nextFrameId

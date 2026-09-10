@@ -9,6 +9,38 @@
     &&s.reminder.findTarget===s.target&&(s.reminder.findTaskSeq||0)===s.task;
   const phrases={search:'还没找到，请慢慢移动镜头。',left:'往左一点。',right:'往右一点。',
     forward:'方向对了。',reach:'到了，可以伸手。',reachLow:'到了，请蹲下伸手。'};
+  let speechOwner=null,speechPlayer=null,speechPendingAt=0,speechAudioAt=0;
+  function playerFor(reminder){return reminder?.transport==='aliyun-realtime'?appState.realtime?.player:reminder?.player;}
+  function protectSpeech(reminder){
+    speechOwner=reminder;
+    const player=playerFor(reminder);
+    if(!player||player===speechPlayer)return;
+    speechPlayer=player;speechPendingAt=0;speechAudioAt=0;
+    const enqueue=player.enqueue;
+    player.enqueue=function(data){
+      const end=enqueue.apply(this,arguments);
+      if(speechOwner===appState.geminiReminder&&speechPlayer===this){
+        if(speechPendingAt)log('speech_audio_started',{waitMs:Date.now()-speechPendingAt});
+        speechPendingAt=0;speechAudioAt=Date.now();
+      }
+      return end;
+    };
+  }
+  function physicalSpeechBusy(reminder){
+    if(reminder!==speechOwner||reminder!==appState.geminiReminder||reminder?.stopping)return false;
+    const player=playerFor(reminder),ctx=player?.audioContext,now=Date.now();
+    // A delayed first chunk must not let a second SAY cancel the first request.
+    if(speechPendingAt){
+      if(now-speechPendingAt<20000)return true;
+      log('speech_audio_timeout',{waitMs:now-speechPendingAt});speechPendingAt=0;
+    }
+    if(ctx&&player){
+      if((ctx.state==='suspended'||ctx.state==='interrupted')&&player.sources?.length)return true;
+      const latency=Math.max(0.15,Number(ctx.outputLatency)||0,Number(ctx.baseLatency)||0);
+      if(player.nextStartTime>0&&ctx.currentTime<player.nextStartTime+latency)return true;
+    }
+    return speechAudioAt>0&&now-speechAudioAt<300;
+  }
 
   // Recover only an expired player latch. A completed model response alone does
   // not mean queued audio has finished; respect the actual audio clock and tail.
@@ -28,7 +60,7 @@
   }
   function voiceBusy(reminder){
     refreshAudio(reminder);
-    if(reminder?.turnInProgress||isGeminiPlaybackActive(reminder))return true;
+    if(reminder?.turnInProgress||reminder?.assistantResponseActive||isGeminiPlaybackActive(reminder))return true;
     if(reminder?.transport==='aliyun-realtime'){
       const host=appState.activeReminder,rt=appState.realtime;
       return !!(host?.pendingMessage||host?.awaitingResponse||rt?.responseInProgress);
@@ -48,9 +80,10 @@
     if(s.lastCode===code&&now-s.lastSaid<repeat)return false;
     const text=code==='reach'&&s.firstResult?.requiresCrouch?phrases.reachLow:phrases[code];
     if(!sendGeminiLiveEvent({type:'say',text,deliveryMode:'guidance'}))return false;
-    s.lastCode=code;s.lastSaid=now;s.speechGuardUntil=now+700;
+    s.lastCode=code;s.lastSaid=now;
     log('model_guidance',{code,phase:s.phase,meters:s.observation?.meters,x:s.observation?.x,
       y:s.observation?.y,onScreen:s.observation?.onScreen,
+      targetWorld:s.observation?.targetWorld,cameraWorld:s.observation?.cameraWorld,
       requiresCrouch:code==='reach'&&s.firstResult?.requiresCrouch===true,source:'lidar_world_anchor'});
     return true;
   }
@@ -65,7 +98,7 @@
     const targetAt=location.indexOf(s.target);
     if(targetAt>=0&&targetAt<=12)location=location.slice(targetAt+s.target.length).replace(/^(?:就)?在/,'');
     if(announceFindObjectLocation(s.reminder,s.target,location,s.seedFrame,r.confidence,context)){
-      s.announced=true;s.speechGuardUntil=Date.now()+700;
+      s.announced=true;
     }
   }
   window.__nativeFindFrame=packet=>{latest=packet;};
@@ -97,7 +130,7 @@
     try{
       const response=await fetch('/api/find-object-check',{method:'POST',headers:{'Content-Type':'application/json'},signal:controller.signal,
         body:JSON.stringify({target:s.target,frameCount:frame.frameId,reminderSessionId:s.reminder.reminderSessionId||'',
-          nativeFindHandStage:false,imageDataUrl:frame.imageDataUrl})});
+          nativeFindHandStage:false,nativeFindAnchorSeed:true,imageDataUrl:frame.imageDataUrl})});
       const r=await response.json();if(!alive(s))return;
       if(!response.ok||!r.ok)throw new Error(r.error||'recognition_failed');
       if(Number(r.frameCount)!==frame.frameId||Date.now()-frame.capturedAtMs>11000)return;
@@ -164,9 +197,11 @@
   function begin(reminder){
     stop();reminder.nativeFindHandStage=false;const s={reminder,target:reminder.findTarget,task:reminder.findTaskSeq||0,
       token:`nf_${Date.now()}_${++counter}`,phase:'lock',seedFrame:0,anchorReady:false,observation:null,
-      inFlight:false,lastModelFrame:0,retryAt:Date.now()+400,hasSearchMiss:false,lastCode:'',lastSaid:0,speechGuardUntil:0};
+      inFlight:false,lastModelFrame:0,retryAt:Date.now()+400,hasSearchMiss:false,lastCode:'',lastSaid:0,
+      speechGuardUntil:Date.now()+700,lastSpeechBlockedAt:0};
+    protectSpeech(reminder);
     current=s;post({type:'begin',token:s.token});timer=setInterval(()=>tick(s),100);
-    log('started',{target:s.target,token:s.token,version:37,voice:'existing_model'});
+    log('started',{target:s.target,token:s.token,version:38,voice:'existing_model'});
   }
   document.addEventListener('click',event=>{
     const button=event.target?.closest?.('button'),id=button?.id||'';
@@ -191,10 +226,42 @@
     };
     const originalClear=clearGeminiFindObjectMemory;
     clearGeminiFindObjectMemory=function(){stop();return originalClear.apply(this,arguments);};
+    const originalPlayback=isGeminiPlaybackActive;
+    isGeminiPlaybackActive=function(reminder=appState.geminiReminder){
+      return physicalSpeechBusy(reminder)||originalPlayback.apply(this,arguments);
+    };
+    if(typeof handleGeminiLiveMessage==='function'){
+      const originalMessage=handleGeminiLiveMessage;
+      handleGeminiLiveMessage=function(raw){
+        if(speechOwner===appState.geminiReminder&&!speechOwner?.stopping){
+          let message;try{message=JSON.parse(raw);}catch{}
+          if(message?.interrupted&&(physicalSpeechBusy(speechOwner)||speechOwner.turnInProgress)){
+            log('speech_interruption_ignored',{reason:'button_only_find_task'});
+            raw=JSON.stringify({...message,interrupted:false});
+          }
+        }
+        return originalMessage.call(this,raw);
+      };
+    }
     const originalSend=sendGeminiLiveEvent;
     sendGeminiLiveEvent=function(event){
       // The voice model receives text only while geometry owns the approach.
       if(current&&current.phase!=='legacy_hand'&&(event?.type==='video'||event?.type==='ask'))return false;
+      if(current&&event?.type==='say'&&event.text){
+        if(busy(current)){
+          const now=Date.now();
+          if(now-current.lastSpeechBlockedAt>1000){current.lastSpeechBlockedAt=now;log('speech_waiting',{phase:current.phase,text:String(event.text).slice(0,40)});}
+          return false;
+        }
+        const sent=originalSend.apply(this,arguments);
+        if(sent){
+          const now=Date.now();
+          speechPendingAt=now;
+          current.speechGuardUntil=Math.max(current.speechGuardUntil,now+700);
+          log('speech_reserved',{phase:current.phase,text:String(event.text).slice(0,60)});
+        }
+        return sent;
+      }
       return originalSend.apply(this,arguments);
     };
   };
