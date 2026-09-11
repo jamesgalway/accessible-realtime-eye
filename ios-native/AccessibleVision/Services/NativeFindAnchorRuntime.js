@@ -13,7 +13,7 @@
     &&s.reminder.findTarget===s.target&&(s.reminder.findTaskSeq||0)===s.task;
   const phrases={search:'还没找到，请慢慢移动镜头。',left:'往左一点。',right:'往右一点。',
     forward:'方向对了。',reach:'到了，可以伸手。',reachLow:'到了，请蹲下伸手。'};
-  let speechOwner=null,speechPlayer=null,speechPendingAt=0,speechAudioAt=0;
+  let speechOwner=null,speechPlayer=null,speechPendingAt=0,speechAudioAt=0,speechFallback=null;
   function playerFor(reminder){return reminder?.transport==='aliyun-realtime'?appState.realtime?.player:reminder?.player;}
   function protectSpeech(reminder){
     speechOwner=reminder;
@@ -22,6 +22,17 @@
     speechPlayer=player;speechPendingAt=0;speechAudioAt=0;
     const enqueue=player.enqueue;
     player.enqueue=function(data){
+      // Discard only a superseded fallback that has never reached the speaker.
+      // Once its first audio chunk is queued, let the entire utterance finish.
+      if(speechPlayer===this&&speechFallback&&!speechFallback.started){
+        const f=speechFallback;
+        if(f.cancelled||!alive(f.state)||handSide(f.state)!==f.side){
+          f.cancelled=true;speechPendingAt=0;
+          if(!f.logged){f.logged=true;log('hand_fallback_cancelled',{reason:'superseded_before_audio'});}
+          return Date.now();
+        }
+        f.started=true;
+      }
       const end=enqueue.apply(this,arguments);
       if(speechOwner===appState.geminiReminder&&speechPlayer===this){
         if(speechPendingAt)log('speech_audio_started',{waitMs:Date.now()-speechPendingAt});
@@ -72,7 +83,33 @@
     return false;
   }
   const busy=s=>Date.now()<s.speechGuardUntil||voiceBusy(s.reminder);
+  function handSide(s){
+    const e=s.handEvidence,o=s.observation;
+    if(!alive(s)||s.phase!=='legacy_hand'||!e||e.visible!=='no'||e.hand!=='visible'
+      ||e.confidence<0.55||Date.now()-e.capturedAtMs>6000
+      ||!s.anchorReady||!NativeFindPolicy.fresh(o,Date.now())||o.inFront===false)return '';
+    return o.x<0?'left':o.x>1?'right':'';
+  }
+  function handFallback(s){
+    const side=handSide(s);
+    if(!side||busy(s)||Date.now()-(s.lastFallbackAt||0)<2500)return;
+    const text=side==='left'?'手往左一点。':'手往右一点。';
+    if(sendGeminiLiveEvent({type:'say',text,deliveryMode:'guidance',nativeFindFallback:side})){
+      s.lastFallbackAt=Date.now();
+      log('hand_fallback',{side,x:s.observation.x,source:'original_world_anchor'});
+    }
+  }
+  window.__nativeFindHandResult=(reminder,result)=>{
+    const s=current;if(!s||!alive(s)||s.phase!=='legacy_hand'||s.reminder!==reminder)return false;
+    s.handEvidence=result;
+    if(speechFallback&&!speechFallback.started&&handSide(s)!==speechFallback.side)speechFallback.cancelled=true;
+    // A missing target is not permission to re-search or walk. The next model
+    // frame still runs normally; the original anchor supplies lateral help only.
+    if(result.visible==='no'&&result.hand==='visible'&&result.confidence>=0.55){handFallback(s);return true;}
+    return false;
+  };
   function stop(){
+    if(speechFallback&&!speechFallback.started)speechFallback.cancelled=true;
     if(current){current.reminder.nativeFindHandStage=false;current.abort?.abort();post({type:'stop'});log('stopped',{token:current.token});}
     current=null;if(timer)clearInterval(timer);timer=null;
   }
@@ -92,7 +129,7 @@
     return true;
   }
   function announce(s){
-    if(!s.firstResult||s.announced||busy(s))return;
+    if(!s.firstResult||!s.anchorReady||!NativeFindPolicy.fresh(s.observation,Date.now())||s.announced||busy(s))return;
     const r=s.firstResult,o=s.observation;
     const x=o?.valid?o.x:r.box[0]+r.box[2]/2,y=o?.valid?o.y:r.box[1]+r.box[3]/2;
     const meters=o?.valid?o.meters:s.initialMeters;
@@ -109,9 +146,14 @@
   window.__nativeFindObservation=o=>{
     const s=current;if(!s||!alive(s)||o.token!==s.token||o.seedFrameId!==s.seedFrame)return;
     s.observation=o;
+    if(o.anchorReady)s.anchorReady=true;
     if(o.valid){s.anchorReady=true;s.seedFailed=false;s.lastInvalid='';return;}
     // Never clear the anchor or restart recognition because depth/view changes.
-    if(o.lost&&!s.anchorReady)s.seedFailed=true;
+    if(o.lost&&!s.anchorReady){
+      s.seedFailed=true;s.firstResult=null;s.seedFrame=0;s.observation=null;s.phase='lock';
+      s.retryAt=Date.now()+1500;s.hasSearchMiss=false;
+      log('seed_retry',{reason:o.reason});
+    }
     if(s.lastInvalid!==o.reason){s.lastInvalid=o.reason;log('tracking_status',{reason:o.reason,anchorPreserved:s.anchorReady});}
   };
   const frameDepth=(frame,box)=>{
@@ -174,14 +216,14 @@
     if(!alive(s)||!selected||!enabled){stop();return;}
     if(document.hidden)return;
     refreshAudio(s.reminder);
-    if(s.phase==='legacy_hand')return;
+    if(s.phase==='legacy_hand'){handFallback(s);return;}
     // Let the opening acknowledgement finish. Only say "not found" after an
     // actual recognition miss; a fast first hit goes straight to its location.
     if(!s.firstResult){recognize(s);if(s.hasSearchMiss)speak(s,'search');return;}
     if(!s.announced){announce(s);return;}
     if(busy(s))return;
     if(s.phase==='reach_speech'){
-      s.phase='legacy_hand';s.reminder.nativeFindHandStage=true;post({type:'stop'});
+      s.phase='legacy_hand';s.reminder.nativeFindHandStage=true;
       s.reminder.findLocationAnnounced=true;s.reminder.findTargetLocked=true;
       s.reminder.findTargetSeenCount=Math.max(2,s.reminder.findTargetSeenCount||0);
       s.reminder.findLastSpokenStatus='';s.reminder.findLastSpokenAt=0;
@@ -216,7 +258,7 @@
       speechGuardUntil:Date.now()+700,lastSpeechBlockedAt:0};
     protectSpeech(reminder);
     current=s;post({type:'begin',token:s.token});timer=setInterval(()=>tick(s),100);
-    log('started',{target:s.target,token:s.token,version:40,voice:'existing_model'});
+    log('started',{target:s.target,token:s.token,version:41,voice:'existing_model'});
   }
   document.addEventListener('click',event=>{
     const button=event.target?.closest?.('button'),id=button?.id||'';
@@ -268,7 +310,12 @@
           if(now-current.lastSpeechBlockedAt>1000){current.lastSpeechBlockedAt=now;log('speech_waiting',{phase:current.phase,text:String(event.text).slice(0,40)});}
           return false;
         }
-        const sent=originalSend.apply(this,arguments);
+        const fallback=event.nativeFindFallback;
+        const previousFallback=speechFallback;
+        speechFallback=fallback?{state:current,side:fallback,started:false,cancelled:false}:null;
+        const outgoing={...event};delete outgoing.nativeFindFallback;
+        const sent=originalSend.call(this,outgoing);
+        if(!sent)speechFallback=previousFallback;
         if(sent){
           const now=Date.now();
           speechPendingAt=now;

@@ -282,6 +282,15 @@ enum NativeVisionBridgeScript {
 
       const applyNativeFindDepth = (result, packet, body) => {
         if (!result) return result;
+        if (body?.nativeFindHandStage === true) {
+          // The world-anchor runtime has already handed over. Current depth
+          // cannot reopen walking, even if the hand occludes the target.
+          const status = String(result.status || 'uncertain');
+          if (status === 'contact') return result;
+          if (String(result.visible || '') === 'no') return { ...result, status: 'target_missing' };
+          const move = findHandDirectionForApproach(status);
+          return move ? { ...result, status: result.hand === 'visible' ? move : result.hand === 'missing' ? 'hand_missing' : 'uncertain' } : result;
+        }
         const status = String(result.status || 'uncertain');
         const visible = String(result.visible || '');
         const hand = String(result.hand || '');

@@ -41,7 +41,8 @@ final class NativeFindTracker {
         guard armed, token == newToken, body["type"] as? String == "seed",
               let id = body["frameId"] as? Int, let box = body["box"] as? [Double], box.count == 4,
               box.allSatisfy({ $0.isFinite && $0 >= 0 && $0 <= 1 }),
-              box[2] > 0, box[3] > 0, box[0] + box[2] <= 1, box[1] + box[3] <= 1 else { return }
+               box[2] > 0, box[3] > 0, box[0] + box[2] <= 1, box[1] + box[3] <= 1 else { return }
+        guard targetAnchor == nil else { return }
         seedFrameId = id
         guard let frame = history.first(where: { $0.id == id }),
               ProcessInfo.processInfo.systemUptime - frame.time < 12 else { emitInvalid("seed_expired", lost: true); return }
@@ -59,6 +60,8 @@ final class NativeFindTracker {
         let anchor = ARAnchor(name: "native-find-target", transform: transform)
         targetAnchor = anchor
         session.add(anchor: anchor)
+        onUpdate?(["token":token,"seedFrameId":seedFrameId,"valid":false,
+            "anchorReady":true,"reason":"anchor_created","lost":false])
     }
 
     func process(_ frame: ARFrame, packet: NativeVisionFramePacket?) {
@@ -114,7 +117,7 @@ final class NativeFindTracker {
         let onScreen = inFront && x >= 0 && x <= 1 && y >= 0 && y <= 1
         let captureAt = Date().timeIntervalSince1970 * 1000 - (now-frame.timestamp)*1000
         onUpdate?(["token":token,"seedFrameId":seedFrameId,"valid":true,
-            "x":x,"y":y,"meters":meters,"onScreen":onScreen,
+            "x":x,"y":y,"meters":meters,"onScreen":onScreen,"inFront":inFront,
             "targetWorld":[target.x,target.y,target.z],
             "cameraWorld":[frame.camera.transform.columns.3.x,frame.camera.transform.columns.3.y,frame.camera.transform.columns.3.z],
             "source":"lidar_world_anchor","at":captureAt])

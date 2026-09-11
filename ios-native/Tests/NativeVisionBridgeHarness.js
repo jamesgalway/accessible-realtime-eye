@@ -259,6 +259,16 @@ async function run() {
   assert.equal(result.status, 'walk_right');
   assert.equal(result.nativeLidar.decision, 'keep_approach_phase');
 
+  for (const backend of ['greenCloud', 'aliyun']) {
+    window.__ACCESSIBLE_VISION_BACKEND__ = backend;
+    for (const api of ['/api/find-object-check', '/api/find-object-live-check', '/api/find-object-direct-finalize']) {
+      for (const [status, hand, expected] of [['hand_missing','missing','hand_missing'],['contact','visible','contact'],['walk_right','visible','move_right'],['walk_forward','uncertain','uncertain']]) {
+        findResult = {ok:true,status,hand,visible:'yes',zone:'right',targetX:0.82,targetY:0.5,confidence:0.9};
+        const handResponse = await fetch(api,{method:'POST',body:JSON.stringify({imageDataUrl:farImage,target:'far hand target',frameCount:1,reminderSessionId:'hand-'+api,nativeFindHandStage:true})});
+        assert.equal((await handResponse.json()).status,expected,backend+' '+api+' '+status);
+      }
+    }
+  }
   window.__ACCESSIBLE_VISION_BACKEND__ = 'aliyun';
   await fetch('/api/find-object-check', {
     method: 'POST',
