@@ -216,7 +216,7 @@
       speechGuardUntil:Date.now()+700,lastSpeechBlockedAt:0};
     protectSpeech(reminder);
     current=s;post({type:'begin',token:s.token});timer=setInterval(()=>tick(s),100);
-    log('started',{target:s.target,token:s.token,version:38,voice:'existing_model'});
+    log('started',{target:s.target,token:s.token,version:40,voice:'existing_model'});
   }
   document.addEventListener('click',event=>{
     const button=event.target?.closest?.('button'),id=button?.id||'';
