@@ -1,0 +1,134 @@
+--- a/server.js
++++ b/server.js
+@@ -2065,6 +2065,11 @@
+     modelNearOverrideFrames: FIND_DEPTH_MODEL_NEAR_OVERRIDE_FRAMES,
+     modelNearOverride: false
+   };
++  if (context.nativeHandStage === true) {
++    const status = parsed?.status || 'uncertain';
++    const move = { walk_left: 'move_left', walk_right: 'move_right', walk_forward: 'move_forward' }[status];
++    return { result: move ? { ...parsed, status: parsed.hand === 'visible' ? move : parsed.hand === 'missing' ? 'hand_missing' : 'uncertain' } : parsed, metadata: { ...metadata, decision: 'native_hand_preserved' } };
++  }
+   if (!parsed || !depthResult?.ok) {
+     return { result: parsed, metadata };
+   }
+@@ -2376,7 +2381,9 @@
+   let status = 'uncertain';
+   const effectiveView = foregroundFloor === 'large' ? 'wide_scene' : view;
+   if (nativeHandStage) {
+-    if (visible === 'yes' && hand === 'missing') {
++    if (visible === 'no') {
++      status = 'target_missing';
++    } else if (visible === 'yes' && hand === 'missing') {
+       status = 'hand_missing';
+     } else if (visible === 'yes' && hand === 'visible') {
+       status = ({
+@@ -2591,6 +2598,7 @@
+   assertFindObjectLiveExperimentAvailable();
+   const imageDataUrl = typeof body?.imageDataUrl === 'string' ? body.imageDataUrl : '';
+   const comparisonMode = Boolean(body?.comparisonMode);
++  const nativeHandStage = body?.nativeFindHandStage === true;
+   const target = String(body?.target || '').replace(/\s+/g, ' ').trim();
+   const frameCount = Number(body?.frameCount || 0);
+   const referenceFrameCount = Number(body?.referenceFrameCount || 0);
+@@ -2611,7 +2619,7 @@
+     : JSON.stringify(body?.modelResult || {});
+   const modelParsed = comparisonMode
+     ? parseFindObjectComparisonResult(serialized)
+-    : parseFindObjectResult(serialized);
++    : parseFindObjectResult(serialized, { nativeHandStage });
+   if (!modelParsed) {
+     throw httpError(422, '手机直连 3.1 Flash 返回了无效找物结果。');
+   }
+@@ -2637,6 +2645,7 @@
+     : { ok: false, error: 'disabled_for_find_object', latencyMs: 0 };
+   const depthApplied = FIND_OBJECT_DEPTH_ASSIST_ENABLED
+     ? applyFindDepthAssist(modelParsed, depthResult, {
++      nativeHandStage,
+       reminderSessionId,
+       target,
+       frameCount
+@@ -3155,6 +3164,7 @@
+   const depthApplied = comparisonMode || !FIND_OBJECT_DEPTH_ASSIST_ENABLED
+     ? { result: modelParsed, metadata: null }
+     : applyFindDepthAssist(modelParsed, depthResult, {
++      nativeHandStage,
+       reminderSessionId,
+       target,
+       frameCount
+@@ -3241,6 +3251,7 @@
+   const depthApplied = comparisonMode || !FIND_OBJECT_DEPTH_ASSIST_ENABLED
+     ? { result: modelParsed, metadata: null }
+     : applyFindDepthAssist(modelParsed, depthResult, {
++      nativeHandStage,
+       reminderSessionId,
+       target,
+       frameCount
+--- a/public/app.js
++++ b/public/app.js
+@@ -8338,6 +8338,7 @@
+     comparisonMode,
+     referenceFrameCount,
+     modelLatencyMs,
++    nativeFindHandStage: nativeHandStage,
+     screenLane: lane + 1
+   });
+ }
+@@ -8394,7 +8395,7 @@
+   }
+   if (reminder.findTouchConfirmationPending) {
+     const pendingMs = Date.now() - (reminder.findTouchConfirmationAskedAt || Date.now());
+-    if (pendingMs < FIND_TOUCH_CONFIRM_TIMEOUT_MS) {
++    if (reminder.nativeFindHandStage !== true && pendingMs < FIND_TOUCH_CONFIRM_TIMEOUT_MS) {
+       return;
+     }
+     reminder.findTouchConfirmationPending = false;
+@@ -8419,6 +8420,7 @@
+     })
+     : (body) => apiPost(findCheckPath, body);
+   try {
++    const imageCapturedAtMs = Date.now();
+     const imageDataUrl = captureReminderFrame(FIND_OBJECT_FRAME_OPTIONS);
+     const followLockedAliSubject = appState.appVariant === 'aliyun'
+       && reminder.findSubjectLocked
+@@ -8449,6 +8451,11 @@
+       return;
+     }
+     let status = String(singleResult.status || 'uncertain');
++    if (reminder.nativeFindHandStage === true && isFindObjectApproachStatus(status)) {
++      status = singleResult.hand === 'visible'
++        ? ({ walk_left: 'move_left', walk_right: 'move_right', walk_forward: 'move_forward' }[status])
++        : singleResult.hand === 'missing' ? 'hand_missing' : 'uncertain';
++    }
+     let confidence = Number(singleResult.confidence || 0);
+     const location = String(singleResult.location || '');
+     const zone = String(singleResult.zone || 'unknown');
+@@ -8474,6 +8481,7 @@
+     let comparisonResult = null;
+     if (
+       status === 'target_missing'
++      && reminder.nativeFindHandStage !== true
+       && reminder.findTargetLocked
+       && reminder.findReferenceImageDataUrl
+     ) {
+@@ -8561,6 +8569,11 @@
+       subjectReferenceFrameCount: reminder.findSubjectReferenceFrameCount || 0,
+       debugFrame: comparisonResult?.debugFrame || singleResult.debugFrame || ''
+     });
++
++    if (reminder.nativeFindHandStage === true
++      && window.__nativeFindHandResult?.(reminder, { visible, hand, status, confidence, capturedAtMs: imageCapturedAtMs, frameCount })) {
++      return;
++    }
+ 
+     if (visible === 'yes') {
+       const subjectReferenceImageDataUrl = await createAliFindSubjectIdentityReferenceImage(
+@@ -8671,7 +8684,7 @@
+       completeGeminiFindObjectWhenReady(reminder);
+       return;
+     }
+-    if (status === 'occluded_by_hand' && reminder.findOcclusionCount >= 2) {
++    if (reminder.nativeFindHandStage !== true && status === 'occluded_by_hand' && reminder.findOcclusionCount >= 2) {
+       if (reminder.turnInProgress || isGeminiPlaybackActive(reminder)) {
+         return;
+       }
