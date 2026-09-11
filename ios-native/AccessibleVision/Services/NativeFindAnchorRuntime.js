@@ -3,6 +3,10 @@
   if (!window.webkit?.messageHandlers?.nativeFind || window.__nativeFindInstalled) return;
   window.__nativeFindInstalled = true;
   let selected=false,enabled=false,latest=null,current=null,counter=0,timer=null,oldTick=null;
+  const entryIds={
+    greenCloud:new Set(['start-unified-visual-assistant','start-browser-direct-unified-assistant']),
+    aliyun:new Set(['start-unified-visual-assistant','start-aliyun-unified-visual-assistant'])
+  };
   const post=body=>window.webkit.messageHandlers.nativeFind.postMessage(body);
   const log=(name,details)=>{if(typeof logClientEvent==='function')logClientEvent(`native_find.${name}`,details);};
   const alive=s=>current===s&&appState.geminiReminder===s.reminder&&!s.reminder.stopping
@@ -128,11 +132,21 @@
     const controller=new AbortController();s.abort=controller;const timeout=setTimeout(()=>controller.abort(),12000);
     log('model_request',{phase:'initial_lock',frameId:frame.frameId});
     try{
-      const response=await fetch('/api/find-object-check',{method:'POST',headers:{'Content-Type':'application/json'},signal:controller.signal,
-        body:JSON.stringify({target:s.target,frameCount:frame.frameId,reminderSessionId:s.reminder.reminderSessionId||'',
-          nativeFindHandStage:false,nativeFindAnchorSeed:true,imageDataUrl:frame.imageDataUrl})});
-      const r=await response.json();if(!alive(s))return;
-      if(!response.ok||!r.ok)throw new Error(r.error||'recognition_failed');
+      const body={target:s.target,frameCount:frame.frameId,reminderSessionId:s.reminder.reminderSessionId||'',
+        nativeFindHandStage:false,nativeFindAnchorSeed:true,imageDataUrl:frame.imageDataUrl};
+      const direct=s.reminder.findScreenTransport==='browser_direct_live'
+        &&typeof requestBrowserDirectFindScreenResult==='function';
+      let r;
+      if(direct){
+        r=await requestBrowserDirectFindScreenResult(s.reminder,{...body,requestSeq:1});
+      }else{
+        const response=await fetch('/api/find-object-check',{method:'POST',headers:{'Content-Type':'application/json'},
+          signal:controller.signal,body:JSON.stringify(body)});
+        r=await response.json();
+        if(!response.ok||!r.ok)throw new Error(r.error||'recognition_failed');
+      }
+      if(!alive(s))return;
+      if(!r?.ok)throw new Error(r?.error||'recognition_failed');
       if(Number(r.frameCount)!==frame.frameId||Date.now()-frame.capturedAtMs>11000)return;
       const x=Number(r.targetX),y=Number(r.targetY),confidence=Number(r.confidence||0);
       if(r.visible!=='yes'||confidence<0.55||!Number.isFinite(x)||!Number.isFinite(y)
@@ -144,7 +158,8 @@
         requiresCrouch:/(?:地面|地板|脚边|台阶底)/.test(location)};
       s.seedFrame=frame.frameId;s.initialMeters=frameDepth(frame,box);s.firstResult=firstResult;
       s.phase='approach';s.observation=null;
-      log('seed',{frameId:frame.frameId,box,initialMeters:s.initialMeters,transport:'web_find_object'});
+      log('seed',{frameId:frame.frameId,box,initialMeters:s.initialMeters,
+        transport:direct?'browser_direct_live':'server_find_object'});
       post({type:'seed',token:s.token,frameId:frame.frameId,box});announce(s);
     }catch(error){if(alive(s)){s.retryAt=Date.now()+1500;log('model_error',{reason:String(error.message).slice(0,150)});}}
     finally{clearTimeout(timeout);s.inFlight=false;if(s.abort===controller)s.abort=null;}
@@ -206,7 +221,7 @@
   document.addEventListener('click',event=>{
     const button=event.target?.closest?.('button'),id=button?.id||'';
     if(!id.startsWith('start-'))return;
-    selected=id===(window.__ACCESSIBLE_VISION_BACKEND__==='aliyun'?'start-aliyun-unified-visual-assistant':'start-unified-visual-assistant');stop();
+    selected=entryIds[window.__ACCESSIBLE_VISION_BACKEND__]?.has(id)===true;stop();
   },true);
   window.addEventListener('pagehide',stop);
   const previousHooks=window.__accessibleVisionEnableRuntimeHooks;
