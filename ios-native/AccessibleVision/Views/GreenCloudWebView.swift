@@ -44,6 +44,12 @@ struct GreenCloudWebView: UIViewRepresentable {
             source: NativeFindBridge.script, injectionTime: .atDocumentStart, forMainFrameOnly: true
         ))
         configuration.userContentController.add(context.coordinator, name: "nativeFind")
+        configuration.userContentController.addUserScript(WKUserScript(
+            source: TeachingViewpointBridge.script,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        ))
+        configuration.userContentController.add(context.coordinator, name: "teachingViewpoint")
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         context.coordinator.attach(to: webView)
@@ -65,11 +71,13 @@ struct GreenCloudWebView: UIViewRepresentable {
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "nativeVision")
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "nativeLocation")
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "nativeFind")
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "teachingViewpoint")
     }
 
     final class Coordinator: NSObject, WKUIDelegate, WKNavigationDelegate, WKScriptMessageHandler {
         private let location: NativeLocationBridge
         private let find: NativeFindBridge
+        private let teachingViewpoint: TeachingViewpointBridge
         private let camera: NativeCameraService
         private let onMediaCaptureRequested: () -> Void
         private let onMediaCaptureReleased: () -> Void
@@ -85,6 +93,7 @@ struct GreenCloudWebView: UIViewRepresentable {
         ) {
             self.location = NativeLocationBridge(origin: origin)
             self.find = NativeFindBridge(origin: origin, camera: camera)
+            self.teachingViewpoint = TeachingViewpointBridge(origin: origin, camera: camera)
             self.camera = camera
             self.onMediaCaptureRequested = onMediaCaptureRequested
             self.onMediaCaptureReleased = onMediaCaptureReleased
@@ -93,6 +102,7 @@ struct GreenCloudWebView: UIViewRepresentable {
         func attach(to webView: WKWebView) {
             self.webView = webView
             find.attach(webView)
+            teachingViewpoint.attach(webView)
             camera.onFramePacket = { [weak self] packet in
                 DispatchQueue.main.async {
                     self?.receive(packet)
@@ -102,6 +112,7 @@ struct GreenCloudWebView: UIViewRepresentable {
 
         func detach() {
             find.stop()
+            teachingViewpoint.stop()
             location.stop()
             camera.onFramePacket = nil
             webView = nil
@@ -137,6 +148,7 @@ struct GreenCloudWebView: UIViewRepresentable {
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
             find.stop()
+            teachingViewpoint.stop()
             location.stop()
             webReady = false
         }
@@ -161,6 +173,10 @@ struct GreenCloudWebView: UIViewRepresentable {
                 return
             }
             if message.name == "nativeFind" { find.receive(message); return }
+            if message.name == "teachingViewpoint" {
+                teachingViewpoint.receive(message)
+                return
+            }
             guard message.name == "nativeVision" else { return }
             let body = message.body as? [String: Any]
             let type = String(body?["type"] as? String ?? "")

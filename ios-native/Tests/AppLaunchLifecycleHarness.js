@@ -13,6 +13,10 @@ const bridge = fs.readFileSync(
   'ios-native/AccessibleVision/Services/NativeVisionBridgeScript.swift',
   'utf8'
 );
+const configuration = fs.readFileSync(
+  'ios-native/AccessibleVision/Services/AppConfiguration.swift',
+  'utf8'
+);
 
 assert.match(
   view,
@@ -31,6 +35,9 @@ assert.doesNotMatch(
 );
 assert.match(view, /backendButton\(\.greenCloud\)/);
 assert.match(view, /backendButton\(\.aliyun\)/);
+assert.match(view, /backendButton\(\.teachingTest\)/);
+assert.match(configuration, /case teachingTest/);
+assert.match(configuration, /aliyunBaseURL\.appending\(path: "teaching\/start\.html"\)/);
 assert.match(view, /GreenCloudWebView\([\s\S]*?url: selectedBackend\.baseURL/);
 assert.doesNotMatch(
   view,
@@ -72,4 +79,4 @@ assert.match(webView, /nativeMediaReleased/);
 assert.match(bridge, /postNative\(\{ type: 'requestNativeMediaStart' \}\)/);
 assert.match(bridge, /postNative\(\{ type: 'nativeMediaReleased' \}\)/);
 
-console.log('App launch lifecycle harness: 21/21 PASS');
+console.log('App launch lifecycle harness: 24/24 PASS');

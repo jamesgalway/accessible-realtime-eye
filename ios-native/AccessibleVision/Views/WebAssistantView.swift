@@ -26,12 +26,13 @@ struct WebAssistantView: View {
             HStack(spacing: 12) {
                 backendButton(.greenCloud)
                 backendButton(.aliyun)
+                backendButton(.teachingTest)
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
             .background(.bar)
             .accessibilityElement(children: .contain)
-            .accessibilityLabel("选择识别模型")
+            .accessibilityLabel("选择功能入口")
 
             Divider()
 

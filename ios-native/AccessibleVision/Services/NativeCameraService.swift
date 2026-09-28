@@ -62,6 +62,7 @@ final class NativeCameraService: NSObject, ObservableObject, ARSessionDelegate {
 
     var onFramePacket: ((NativeVisionFramePacket) -> Void)?
     let findTracker = NativeFindTracker()
+    let teachingViewpointTracker = TeachingViewpointAnchorTracker()
 
     func findCommand(_ body: [String: Any]) {
         frameQueue.async { [weak self] in
@@ -72,6 +73,17 @@ final class NativeCameraService: NSObject, ObservableObject, ARSessionDelegate {
 
     func setFindObserver(_ callback: @escaping ([String: Any]) -> Void) {
         frameQueue.async { [weak self] in self?.findTracker.onUpdate = callback }
+    }
+
+    func teachingViewpointCommand(_ body: [String: Any]) {
+        frameQueue.async { [weak self] in
+            guard let self else { return }
+            self.teachingViewpointTracker.command(body, session: self.session)
+        }
+    }
+
+    func setTeachingViewpointObserver(_ callback: @escaping ([String: Any]) -> Void) {
+        frameQueue.async { [weak self] in self?.teachingViewpointTracker.onUpdate = callback }
     }
 
     private let frameQueue = DispatchQueue(label: "com.zzypiano.accessiblevision.frames")
@@ -121,7 +133,10 @@ final class NativeCameraService: NSObject, ObservableObject, ARSessionDelegate {
     }
 
     func stop() {
-        frameQueue.async { [weak self] in self?.findTracker.stop() }
+        frameQueue.async { [weak self] in
+            self?.findTracker.stop()
+            self?.teachingViewpointTracker.stop()
+        }
         setTorch(enabled: false)
         session.pause()
         frameLock.lock()
@@ -187,11 +202,13 @@ final class NativeCameraService: NSObject, ObservableObject, ARSessionDelegate {
         let now = ProcessInfo.processInfo.systemUptime
         guard now - lastPacketTime >= Self.packetInterval else {
             findTracker.process(frame, packet: nil)
+            teachingViewpointTracker.process(frame, packet: nil)
             return
         }
         lastPacketTime = now
         guard let packet = makeFramePacket(from: frame, hasDepth: hasDepth) else { return }
         findTracker.process(frame, packet: packet)
+        teachingViewpointTracker.process(frame, packet: packet)
         onFramePacket?(packet)
     }
 
