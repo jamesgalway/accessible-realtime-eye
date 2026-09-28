@@ -92,7 +92,7 @@ final class TeachingViewpointAnchorTracker {
         guard referenceAnchor == nil else { return }
         seedFrameId = id
         guard let frame = history.first(where: { $0.id == id }),
-              ProcessInfo.processInfo.systemUptime - frame.time < 12 else {
+              ProcessInfo.processInfo.systemUptime - frame.time < 90 else {
             emitInvalid("seed_expired", lost: true)
             return
         }
@@ -165,9 +165,9 @@ final class TeachingViewpointAnchorTracker {
                 columns: packet.depthGridWidth,
                 rows: packet.depthGridHeight
             ))
-            history.removeAll { now - $0.time > 12 }
-            if history.count > 40 {
-                history.removeFirst(history.count - 40)
+            history.removeAll { now - $0.time > 90 }
+            if history.count > 320 {
+                history.removeFirst(history.count - 320)
             }
         }
         if let id = referenceAnchor?.identifier,
