@@ -6,7 +6,12 @@ struct WebAssistantView: View {
     @StateObject private var camera = NativeCameraService()
     @StateObject private var torch = NativeTorchController()
     @State private var selectedBackend: AssistantBackend = .greenCloud
+    @State private var teachingMode = false
     @State private var mediaCaptureRequested = false
+
+    private var selectedURL: URL {
+        teachingMode ? selectedBackend.teachingBaseURL : selectedBackend.baseURL
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -26,7 +31,7 @@ struct WebAssistantView: View {
             HStack(spacing: 12) {
                 backendButton(.greenCloud)
                 backendButton(.aliyun)
-                backendButton(.teachingTest)
+                teachingButton
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
@@ -37,7 +42,7 @@ struct WebAssistantView: View {
             Divider()
 
             GreenCloudWebView(
-                url: selectedBackend.baseURL,
+                url: selectedURL,
                 backend: selectedBackend,
                 camera: camera,
                 onMediaCaptureRequested: {
@@ -52,7 +57,7 @@ struct WebAssistantView: View {
                     camera.stop()
                 }
             )
-            .id(selectedBackend.rawValue)
+            .id("\(selectedBackend.rawValue):\(teachingMode ? "teaching" : "assistant")")
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .alert(
@@ -84,20 +89,46 @@ struct WebAssistantView: View {
     }
 
     private func backendButton(_ backend: AssistantBackend) -> some View {
-        let isSelected = selectedBackend == backend
+        let isSelected = selectedBackend == backend && !teachingMode
         return Button(backend.title) {
-            guard selectedBackend != backend else { return }
-            mediaCaptureRequested = false
-            setIdleTimerDisabled(false)
-            torch.turnOff()
-            camera.stop()
+            guard selectedBackend != backend || teachingMode else { return }
+            stopCurrentPageMedia()
             selectedBackend = backend
+            teachingMode = false
         }
         .buttonStyle(.borderedProminent)
         .tint(isSelected ? .accentColor : .secondary)
         .accessibilityLabel(backend.title)
         .accessibilityValue(isSelected ? "当前入口" : "未选择")
         .accessibilityHint(isSelected ? "当前正在使用" : "双击切换到这个入口；旧任务会结束")
+    }
+
+    private var teachingButton: some View {
+        Button("教学") {
+            guard !teachingMode else { return }
+            stopCurrentPageMedia()
+            teachingMode = true
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(teachingMode ? .accentColor : .secondary)
+        .accessibilityLabel("教学")
+        .accessibilityValue(
+            teachingMode
+                ? "当前教学入口，绑定\(selectedBackend.title)"
+                : "将绑定\(selectedBackend.title)"
+        )
+        .accessibilityHint(
+            teachingMode
+                ? "当前正在使用"
+                : "双击进入教学；教学会沿用当前选择的服务器入口和谷歌声音"
+        )
+    }
+
+    private func stopCurrentPageMedia() {
+        mediaCaptureRequested = false
+        setIdleTimerDisabled(false)
+        torch.turnOff()
+        camera.stop()
     }
 
     private func setIdleTimerDisabled(_ disabled: Bool) {

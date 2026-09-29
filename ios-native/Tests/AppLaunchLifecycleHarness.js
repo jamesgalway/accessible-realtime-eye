@@ -35,10 +35,14 @@ assert.doesNotMatch(
 );
 assert.match(view, /backendButton\(\.greenCloud\)/);
 assert.match(view, /backendButton\(\.aliyun\)/);
-assert.match(view, /backendButton\(\.teachingTest\)/);
-assert.match(configuration, /case teachingTest/);
-assert.match(configuration, /aliyunBaseURL\.appending\(path: "teaching\/start\.html"\)/);
-assert.match(view, /GreenCloudWebView\([\s\S]*?url: selectedBackend\.baseURL/);
+assert.match(view, /teachingButton/);
+assert.doesNotMatch(configuration, /case teachingTest/);
+assert.match(configuration, /case \.greenCloud:[\s\S]*?return "greencloud_google"/);
+assert.match(configuration, /case \.aliyun:[\s\S]*?return "aliyun_google"/);
+assert.match(configuration, /baseURL\.appending\(path: "teaching\/start\.html"\)/);
+assert.match(configuration, /URLQueryItem\(name: "runtimeRoute", value: teachingRuntimeRouteId\)/);
+assert.match(view, /GreenCloudWebView\([\s\S]*?url: selectedURL/);
+assert.match(view, /teachingMode \? selectedBackend\.teachingBaseURL : selectedBackend\.baseURL/);
 assert.doesNotMatch(
   view,
   /\.onAppear\s*\{\s*camera\.start\(\)\s*\}/,
@@ -64,8 +68,18 @@ assert.match(
 assert.match(view, /UIApplication\.shared\.isIdleTimerDisabled = disabled/);
 assert.match(
   view,
-  /guard selectedBackend != backend else \{ return \}[\s\S]*?mediaCaptureRequested = false[\s\S]*?camera\.stop\(\)[\s\S]*?selectedBackend = backend/,
+  /guard selectedBackend != backend \|\| teachingMode else \{ return \}[\s\S]*?stopCurrentPageMedia\(\)[\s\S]*?selectedBackend = backend[\s\S]*?teachingMode = false/,
   'Switching backends must stop the previous native media session.'
+);
+assert.match(
+  view,
+  /Button\("教学"\)[\s\S]*?guard !teachingMode else \{ return \}[\s\S]*?stopCurrentPageMedia\(\)[\s\S]*?teachingMode = true/,
+  'Teaching must bind the already selected backend instead of acting as a third backend.'
+);
+assert.match(
+  view,
+  /当前教学入口，绑定\\\(selectedBackend\.title\)/,
+  'VoiceOver must announce which backend the teaching entry is bound to.'
 );
 assert.match(
   webView,
@@ -79,4 +93,4 @@ assert.match(webView, /nativeMediaReleased/);
 assert.match(bridge, /postNative\(\{ type: 'requestNativeMediaStart' \}\)/);
 assert.match(bridge, /postNative\(\{ type: 'nativeMediaReleased' \}\)/);
 
-console.log('App launch lifecycle harness: 24/24 PASS');
+console.log('App launch lifecycle harness: 31/31 PASS');

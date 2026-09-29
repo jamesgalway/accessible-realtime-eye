@@ -24,7 +24,6 @@ enum AppConfiguration {
 enum AssistantBackend: String, CaseIterable, Identifiable {
     case greenCloud
     case aliyun
-    case teachingTest
 
     var id: String { rawValue }
 
@@ -34,8 +33,6 @@ enum AssistantBackend: String, CaseIterable, Identifiable {
             return "绿云 Gemini 版"
         case .aliyun:
             return "阿里百炼版"
-        case .teachingTest:
-            return "教学测试"
         }
     }
 
@@ -45,9 +42,30 @@ enum AssistantBackend: String, CaseIterable, Identifiable {
             return AppConfiguration.greenCloudBaseURL
         case .aliyun:
             return AppConfiguration.aliyunBaseURL
-        case .teachingTest:
-            return AppConfiguration.aliyunBaseURL.appending(path: "teaching/start.html")
         }
+    }
+
+    var teachingRuntimeRouteId: String {
+        switch self {
+        case .greenCloud:
+            return "greencloud_google"
+        case .aliyun:
+            return "aliyun_google"
+        }
+    }
+
+    var teachingBaseURL: URL {
+        let pageURL = baseURL.appending(path: "teaching/start.html")
+        guard var components = URLComponents(url: pageURL, resolvingAgainstBaseURL: false) else {
+            preconditionFailure("Teaching URL is invalid")
+        }
+        components.queryItems = [
+            URLQueryItem(name: "runtimeRoute", value: teachingRuntimeRouteId)
+        ]
+        guard let url = components.url else {
+            preconditionFailure("Teaching URL route is invalid")
+        }
+        return url
     }
 }
 
