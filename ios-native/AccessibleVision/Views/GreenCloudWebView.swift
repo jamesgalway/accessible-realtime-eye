@@ -78,6 +78,8 @@ struct GreenCloudWebView: UIViewRepresentable {
         private let location: NativeLocationBridge
         private let find: NativeFindBridge
         private let teachingViewpoint: TeachingViewpointBridge
+        private let audioDiagnostics = NativeAudioDiagnostics()
+        private let origin: URL
         private let camera: NativeCameraService
         private let onMediaCaptureRequested: () -> Void
         private let onMediaCaptureReleased: () -> Void
@@ -91,6 +93,7 @@ struct GreenCloudWebView: UIViewRepresentable {
             onMediaCaptureRequested: @escaping () -> Void,
             onMediaCaptureReleased: @escaping () -> Void
         ) {
+            self.origin = origin
             self.location = NativeLocationBridge(origin: origin)
             self.find = NativeFindBridge(origin: origin, camera: camera)
             self.teachingViewpoint = TeachingViewpointBridge(origin: origin, camera: camera)
@@ -101,6 +104,13 @@ struct GreenCloudWebView: UIViewRepresentable {
 
         func attach(to webView: WKWebView) {
             self.webView = webView
+            audioDiagnostics.onSnapshot = { [weak self] packet in
+                guard let self, self.webReady, let currentWebView = self.webView,
+                      let url = currentWebView.url, self.isTeachingURL(url),
+                      let data = try? JSONSerialization.data(withJSONObject: packet),
+                      let json = String(data: data, encoding: .utf8) else { return }
+                currentWebView.evaluateJavaScript("window.ZzyaiTeachingDiagnostics?.record('native_audio_state', \(json));")
+            }
             find.attach(webView)
             teachingViewpoint.attach(webView)
             camera.onFramePacket = { [weak self] packet in
@@ -111,6 +121,8 @@ struct GreenCloudWebView: UIViewRepresentable {
         }
 
         func detach() {
+            audioDiagnostics.stop()
+            audioDiagnostics.onSnapshot = nil
             find.stop()
             teachingViewpoint.stop()
             location.stop()
@@ -121,6 +133,7 @@ struct GreenCloudWebView: UIViewRepresentable {
         }
 
         func releaseMediaResources(in webView: WKWebView) {
+            audioDiagnostics.stop()
             onMediaCaptureReleased()
             webView.pauseAllMediaPlayback {}
             webView.evaluateJavaScript("""
@@ -147,6 +160,7 @@ struct GreenCloudWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            audioDiagnostics.stop()
             find.stop()
             teachingViewpoint.stop()
             location.stop()
@@ -182,11 +196,19 @@ struct GreenCloudWebView: UIViewRepresentable {
             let type = String(body?["type"] as? String ?? "")
             if type == "requestNativeMediaStart" {
                 onMediaCaptureRequested()
+                if let url = webView?.url, isTeachingURL(url) { audioDiagnostics.start() }
             } else if type == "nativeMediaReleased" {
+                audioDiagnostics.stop()
                 onMediaCaptureReleased()
             } else if type == "fallbackWebCamera" {
                 camera.stop()
             }
+        }
+
+        private func isTeachingURL(_ url: URL) -> Bool {
+            url.scheme == origin.scheme && url.host == origin.host
+                && url.port == origin.port
+                && (url.path == "/teaching" || url.path.hasPrefix("/teaching/"))
         }
 
         private func receive(_ packet: NativeVisionFramePacket) {
