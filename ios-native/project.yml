@@ -1,5 +1,6 @@
 name: AccessibleVision
 options:
+  developmentLanguage: zh-Hans
   bundleIdPrefix: com.zzypiano
   deploymentTarget:
     iOS: "16.0"
@@ -22,6 +23,9 @@ targets:
     info:
       path: AccessibleVision/Info.plist
       properties:
+        CFBundleDevelopmentRegion: zh-Hans
+        CFBundleLocalizations:
+          - zh-Hans
         CFBundleDisplayName: "实时慧眼"
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false

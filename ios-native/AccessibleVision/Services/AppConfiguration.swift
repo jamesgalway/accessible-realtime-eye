@@ -30,7 +30,7 @@ enum AssistantBackend: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .greenCloud:
-            return "绿云 Gemini 版"
+            return "绿云谷歌版"
         case .aliyun:
             return "阿里百炼版"
         }
