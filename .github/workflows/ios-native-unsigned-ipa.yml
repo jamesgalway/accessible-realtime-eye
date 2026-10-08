@@ -1,16 +1,17 @@
-name: Build iPhone Test IPA
+name: Build Private iPhone Permissions IPA
 
 permissions:
-  contents: write
+  contents: read
 
 on:
   workflow_dispatch:
   push:
     branches:
-      - ios-native-hardware-foundation
+      - ios-native-web-permissions-20261008
     paths:
       - "ios-native/**"
       - ".github/workflows/ios-native-unsigned-ipa.yml"
+      - ".github/scripts/**"
 
 jobs:
   build:
@@ -22,6 +23,11 @@ jobs:
 
       - name: Install XcodeGen
         run: brew install xcodegen
+
+      - name: Add private native authorization resource
+        env:
+          HUIYAN_NATIVE_ACCESS_BOOTSTRAP: ${{ secrets.HUIYAN_NATIVE_ACCESS_BOOTSTRAP }}
+        run: node .github/scripts/write-native-access.cjs
 
       - name: Generate Xcode project
         working-directory: ios-native
@@ -63,22 +69,15 @@ jobs:
           cp -R "$app" Payload/
           /usr/bin/zip -qry AccessibleVision-unsigned.ipa Payload
 
-      - name: Upload IPA artifact
+      - name: Encrypt private IPA
+        env:
+          HUIYAN_NATIVE_IPA_ENCRYPTION_KEY: ${{ secrets.HUIYAN_NATIVE_IPA_ENCRYPTION_KEY }}
+        run: node .github/scripts/encrypt-native-ipa.cjs ios-native/AccessibleVision-unsigned.ipa ios-native/AccessibleVision-private.ipa.enc
+
+      - name: Upload encrypted IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AccessibleVision-unsigned-ipa
-          path: ios-native/AccessibleVision-unsigned.ipa
+          name: AccessibleVision-private-ipa-encrypted
+          path: ios-native/AccessibleVision-private.ipa.enc
           if-no-files-found: error
           retention-days: 7
-
-      - name: Publish temporary unsigned IPA
-        working-directory: ios-native
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "ios-native-test-${GITHUB_RUN_NUMBER}" \
-            AccessibleVision-unsigned.ipa \
-            --target "${GITHUB_SHA}" \
-            --prerelease \
-            --title "iPhone native hardware test ${GITHUB_RUN_NUMBER}" \
-            --notes "Unsigned hardware test build. It must be signed for the test device before installation."

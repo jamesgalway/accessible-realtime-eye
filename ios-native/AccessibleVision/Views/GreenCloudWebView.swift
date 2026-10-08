@@ -57,7 +57,7 @@ struct GreenCloudWebView: UIViewRepresentable {
         webView.navigationDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = false
         webView.scrollView.contentInsetAdjustmentBehavior = .never
-        webView.load(URLRequest(url: url, cachePolicy: .reloadRevalidatingCacheData))
+        context.coordinator.loadAuthorized(in: webView, url: url)
         return webView
     }
 
@@ -86,6 +86,7 @@ struct GreenCloudWebView: UIViewRepresentable {
         private weak var webView: WKWebView?
         private var webReady = false
         private var latestPacket: NativeVisionFramePacket?
+        private var accessTask: Task<Void, Never>?
 
         init(
             origin: URL,
@@ -120,7 +121,25 @@ struct GreenCloudWebView: UIViewRepresentable {
             }
         }
 
+        func loadAuthorized(in webView: WKWebView, url: URL) {
+            accessTask?.cancel()
+            accessTask = Task { @MainActor [weak self, weak webView] in
+                guard let self, let webView else { return }
+                do {
+                    try await NativeAccessEnrollment.authorize(for: url,
+                        cookieStore: webView.configuration.websiteDataStore.httpCookieStore)
+                    guard !Task.isCancelled, self.webView === webView else { return }
+                    webView.load(URLRequest(url: url, cachePolicy: .reloadRevalidatingCacheData))
+                } catch {
+                    guard !Task.isCancelled, self.webView === webView else { return }
+                    webView.loadHTMLString("<html lang='zh-CN'><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'><body><h1>暂时无法连接应用</h1><p>后台权限验证未完成。请检查网络后重新打开应用。</p></body></html>", baseURL: nil)
+                }
+            }
+        }
+
         func detach() {
+            accessTask?.cancel()
+            accessTask = nil
             audioDiagnostics.stop()
             audioDiagnostics.onSnapshot = nil
             find.stop()
@@ -133,6 +152,7 @@ struct GreenCloudWebView: UIViewRepresentable {
         }
 
         func releaseMediaResources(in webView: WKWebView) {
+            accessTask?.cancel()
             audioDiagnostics.stop()
             onMediaCaptureReleased()
             webView.pauseAllMediaPlayback {}
