@@ -15,6 +15,7 @@ final class ScreenBroadcastReceiver {
     var frameAge: Double? { lastFrame.map { Date().timeIntervalSince($0) } }
     var onFrame: (() -> Void)?
     var onEnd: ((String) -> Void)?
+    var onState: ((String, NWError?) -> Void)?
 
     func start() throws {
         let parameters = NWParameters.tcp
@@ -23,12 +24,19 @@ final class ScreenBroadcastReceiver {
         self.listener = listener
         listener.newConnectionHandler = { [weak self] connection in self?.accept(connection) }
         listener.stateUpdateHandler = { [weak self] state in
+            switch state {
+            case .ready: self?.onState?("listener_ready", nil)
+            case .waiting(let error): self?.onState?("listener_waiting", error)
+            case .failed(let error): self?.onState?("listener_failed", error)
+            default: break
+            }
             if case .failed = state { self?.onEnd?("屏幕共享连接未能启动，请结束后重试。") }
         }
         listener.start(queue: .main)
     }
     private func accept(_ connection: NWConnection) {
         guard reader == nil else { connection.cancel(); return }
+        onState?("broadcast_connected", nil)
         challenge = UUID().uuidString + UUID().uuidString
         authenticated = false; lastPacket = Date()
         let reader = ScreenBroadcastReader(connection)
@@ -36,8 +44,11 @@ final class ScreenBroadcastReceiver {
         reader.onPacket = { [weak self, weak reader] type, payload in
             guard let self, let reader, self.reader === reader else { return }
             if !self.authenticated {
-                guard type == 1, ScreenBroadcastWire.matches(payload, challenge: self.challenge) else { reader.finish(); return }
+                guard type == 1, ScreenBroadcastWire.matches(payload, challenge: self.challenge) else {
+                    self.onState?("broadcast_authorization_failed", nil); reader.finish(); return
+                }
                 self.authenticated = true; self.lastPacket = Date()
+                self.onState?("broadcast_authorized", nil)
                 connection.send(content: ScreenBroadcastWire.packet(1), completion: .contentProcessed { _ in })
                 return
             }
@@ -51,6 +62,7 @@ final class ScreenBroadcastReceiver {
         reader.onEnd = { [weak self, weak reader] in
             guard let self, let reader, self.reader === reader else { return }
             let wasActive = self.authenticated
+            self.onState?("broadcast_transport_closed", nil)
             self.reader = nil; self.image = nil; self.authenticated = false
             self.timer?.invalidate(); self.timer = nil
             if wasActive { self.onEnd?("屏幕共享连接已结束。") }
@@ -73,7 +85,7 @@ final class ScreenBroadcastReceiver {
         return "data:image/jpeg;base64," + data.base64EncodedString()
     }
     func stop() {
-        onEnd = nil; onFrame = nil
+        onEnd = nil; onFrame = nil; onState = nil
         timer?.invalidate(); timer = nil
         let old = reader; reader = nil; old?.finish()
         listener?.cancel(); listener = nil; image = nil; authenticated = false

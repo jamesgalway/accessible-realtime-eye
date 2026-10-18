@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   const host = __screenHostCall;
-  const screenSessionID = crypto.randomUUID();
+  const screenSessionID = globalThis.__screenStartupID || crypto.randomUUID();
   globalThis.__screenNetworkEvent = details => logClientEvent('screen_share.connection', {
     screenSessionID, backend: __screenBackend, ...details
   });

@@ -17,18 +17,26 @@ final class ScreenShareRuntime: NSObject, URLSessionWebSocketDelegate {
     private var requests: [Int: URLSessionDataTask] = [:]
     private var sockets: [Int: URLSessionWebSocketTask] = [:]
     private var generation = UUID()
+    private let startupID = UUID().uuidString
+    private var startupBackend = ""
+    private var startupRoute = ""
+    private var stopRecorded = false
     let receiver = ScreenBroadcastReceiver()
     let audio = ScreenShareAudio()
     var onError: ((String) -> Void)?
 
     @MainActor
     func load(backend: AssistantBackend, googleRoute: ScreenShareGoogleRoute) async throws {
+        startupBackend = backend == .aliyun ? "aliyun" : "greencloud"
+        startupRoute = backend == .aliyun ? "aliyun-video" : googleRoute.rawValue
+        recordStartup("authorization_started")
         let ticket = generation
         let dataStore = WKWebsiteDataStore.nonPersistent()
         let cookie = try await NativeAccessEnrollment.authorize(for: backend.baseURL, cookieStore: dataStore.httpCookieStore)
         let cookies = [cookie]
         try Task.checkCancellation()
         guard ticket == generation else { throw CancellationError() }
+        recordStartup("authorization_ready")
         baseURL = backend.baseURL
         enrolledCookies = cookies
         let config = URLSessionConfiguration.ephemeral
@@ -49,6 +57,7 @@ final class ScreenShareRuntime: NSObject, URLSessionWebSocketDelegate {
         context.setObject(backend.baseURL.absoluteString, forKeyedSubscript: "__screenBaseURL" as NSString)
         context.setObject(backend == .aliyun ? "aliyun" : "greencloud", forKeyedSubscript: "__screenBackend" as NSString)
         context.setObject(googleRoute.rawValue, forKeyedSubscript: "__screenGoogleRoute" as NSString)
+        context.setObject(startupID, forKeyedSubscript: "__screenStartupID" as NSString)
         for name in ["ScreenRuntimeEnvironment", "screen-google-sdk", backend == .aliyun ? "aliyun-screen-runtime" : "greencloud-screen-runtime"] {
             guard let url = Bundle.main.url(forResource: name, withExtension: "js") else { throw URLError(.fileDoesNotExist) }
             context.evaluateScript(try String(contentsOf: url, encoding: .utf8), withSourceURL: URL(string: "huiyan-resource:///" + name + ".js"))
@@ -57,6 +66,62 @@ final class ScreenShareRuntime: NSObject, URLSessionWebSocketDelegate {
         audio.onInput = { [weak self] data in self?.event(["kind": "pcm", "data": data.base64EncodedString()]) }
         audio.onPlayed = { [weak self] id in self?.event(["kind": "audioEnded", "id": id]) }
         audio.onSpeech = { [weak self] id, type in self?.event(["kind": "speech", "id": id, "type": type]) }
+        recordStartup("runtime_loaded")
+        uploadStartupHistory()
+    }
+
+    // Store only lifecycle facts. A later successful preparation can report an
+    // earlier attempt that failed before JavaScript or model logging existed.
+    func recordStartup(_ phase: String, details: [String: Any] = [:]) {
+        let packet = details.merging([
+            "screenSessionID": startupID, "phase": phase,
+            "backend": startupBackend, "route": startupRoute,
+            "atMs": Date().timeIntervalSince1970 * 1000,
+            "uptimeMs": ProcessInfo.processInfo.systemUptime * 1000
+        ]) { _, new in new }
+        var history = Self.readStartupHistory()
+        history.append(packet)
+        if let url = Self.startupHistoryURL(),
+           let data = try? JSONSerialization.data(withJSONObject: Array(history.suffix(64))) {
+            try? data.write(to: url, options: .atomic)
+        }
+        if let logger = context?.objectForKeyedSubscript("logClientEvent"), !logger.isUndefined, !logger.isNull {
+            logger.call(withArguments: ["screen_share.startup", packet])
+        }
+    }
+
+    private static func startupHistoryURL() -> URL? {
+        guard let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
+        do { try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true) }
+        catch { return nil }
+        return directory.appendingPathComponent("screen-share-startup.json")
+    }
+
+    private static func readStartupHistory() -> [[String: Any]] {
+        guard let url = startupHistoryURL(), let data = try? Data(contentsOf: url), data.count <= 100_000,
+              let records = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
+        return records
+    }
+
+    private func uploadStartupHistory() {
+        var records = Array(Self.readStartupHistory().suffix(24))
+        var encoded = Self.json(records)
+        while encoded.count > 7500 && records.count > 1 {
+            records.removeFirst(); encoded = Self.json(records)
+        }
+        var packet: [String: Any] = ["screenSessionID": startupID, "records": records.count]
+        var tail = encoded[...], index = 0
+        // The existing server logger preserves each string field up to 600
+        // characters; bounded parts retain the complete history without a new API.
+        while !tail.isEmpty {
+            let part = tail.prefix(500)
+            packet["part\(index)"] = String(part)
+            tail = tail.dropFirst(part.count); index += 1
+        }
+        packet["partCount"] = index
+        if let logger = context?.objectForKeyedSubscript("logClientEvent"), !logger.isUndefined, !logger.isNull {
+            logger.call(withArguments: ["screen_share.startup_history", packet])
+        }
     }
 
     func command(_ command: String, text: String = "") {
@@ -221,6 +286,7 @@ final class ScreenShareRuntime: NSObject, URLSessionWebSocketDelegate {
         event(["kind": "socket", "id": id, "type": "close", "code": closeCode.rawValue])
     }
     func stop() {
+        if !stopRecorded { stopRecorded = true; recordStartup("stopped") }
         command("stop")
         generation = UUID()
         timers.values.forEach { $0.invalidate() }; timers.removeAll()
@@ -234,6 +300,7 @@ final class ScreenShareRuntime: NSObject, URLSessionWebSocketDelegate {
     deinit { stop() }
 
     private func reportSocket(id: Int, stage: String, details: [String: Any] = [:]) {
+        recordStartup("socket_" + stage, details: details)
         event(["kind": "network", "details": details.merging(["stage": stage, "socketID": id]) { _, new in new }])
     }
 }

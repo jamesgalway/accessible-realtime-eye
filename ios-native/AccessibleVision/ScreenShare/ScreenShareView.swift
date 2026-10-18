@@ -27,28 +27,41 @@ final class ScreenShareController: ObservableObject {
             self.status = text
             self.connectionError = text
         }
-        runtime.audio.onInterruption = { [weak self] in
+        runtime.audio.onInterruption = { [weak self, weak runtime] in
             guard let self, self.identity == identity else { return }
+            runtime?.recordStartup("audio_interrupted")
             self.stop(message: "声音通道被系统中断，屏幕共享已结束，请重新开始。")
         }
-        runtime.receiver.onEnd = { [weak self] message in
-            guard let self, self.identity == identity else { return }; self.stop(message: message)
+        runtime.receiver.onEnd = { [weak self, weak runtime] message in
+            guard let self, self.identity == identity else { return }
+            runtime?.recordStartup("broadcast_ended")
+            self.stop(message: message)
+        }
+        runtime.receiver.onState = { [weak runtime] phase, error in
+            var details: [String: Any] = [:]
+            if let error { let value = error as NSError; details = ["errorDomain": value.domain, "errorCode": value.code] }
+            runtime?.recordStartup(phase, details: details)
         }
         runtime.receiver.onFrame = { [weak self] in
             guard let self, self.identity == identity, self.prepared, !self.started else { return }
             self.started = true; self.status = "已收到屏幕画面，正在连接慧眼。"
+            runtime.recordStartup("first_screen_frame")
             runtime.command("start")
         }
         task = Task { [weak self] in
             do {
                 try await runtime.load(backend: backend, googleRoute: googleRoute)
                 try Task.checkCancellation()
+                runtime.recordStartup("audio_starting")
                 try await runtime.audio.start()
+                runtime.recordStartup("audio_ready")
                 try Task.checkCancellation()
                 guard let self, self.identity == identity else { runtime.stop(); return }
                 try runtime.receiver.start()
+                runtime.recordStartup("broadcast_waiting")
                 self.preparing = false; self.prepared = true
                 self.status = "请在系统面板开始广播。"
+                runtime.recordStartup("broadcast_panel_requested")
                 self.broadcastPresentation += 1
                 let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
                     guard let self, self.identity == identity, self.started else { return }
@@ -62,6 +75,8 @@ final class ScreenShareController: ObservableObject {
                 self.poll = timer; RunLoop.main.add(timer, forMode: .common)
             } catch {
                 guard let self, self.identity == identity else { runtime.stop(); return }
+                let failure = error as NSError
+                runtime.recordStartup("prepare_failed", details: ["errorDomain": failure.domain, "errorCode": failure.code])
                 self.stop(message: "屏幕共享准备失败：\(error.localizedDescription)")
             }
         }
