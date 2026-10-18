@@ -24,6 +24,9 @@ with log.open('w',encoding='utf-8',newline='\n') as output:
     result=subprocess.run(command,cwd=root,stdout=output,stderr=subprocess.STDOUT,timeout=480)
 lines=log.read_text(encoding='utf-8',errors='replace').splitlines()
 if result.returncode:
+    for index,line in enumerate(lines):
+        if 'error:' in line or 'XCTAssert' in line or 'Asynchronous wait failed' in line:
+            print('\n'.join(lines[max(0,index-1):index+3]))
     print('\n'.join(lines[-90:]))
     sys.exit(result.returncode)
 print('\n'.join(line for line in lines if 'Test Case' in line or 'TEST SUCCEEDED' in line))

@@ -11,6 +11,7 @@ final class NativeTorchController: ObservableObject {
     }
 
     func turnOff() {
+        guard isEnabled else { return }
         setEnabled(false)
     }
 
