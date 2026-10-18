@@ -34,6 +34,12 @@ final class NativeEntryAccessibilityTests: XCTestCase {
         let positions = expected.compactMap { ordered.firstIndex(of: $0) }
         XCTAssertEqual(positions.count, expected.count)
         XCTAssertEqual(positions, positions.sorted())
+        for label in expected {
+            let button = app.buttons.matching(NSPredicate(format: "label == %@", label)).firstMatch
+            XCTAssertTrue(button.exists, "Missing native button: \(label)")
+            if button.isEnabled { XCTAssertTrue(button.isHittable, "Covered native button: \(label)") }
+        }
+        XCTAssertTrue(app.scrollViews["nativeAppScroll"].exists)
         // Switching the backend must detach the Google controls. No model starts.
         ali.tap()
         XCTAssertTrue(ali.isSelected)

@@ -53,6 +53,10 @@ struct GreenCloudWebView: UIViewRepresentable {
             forMainFrameOnly: true
         ))
         configuration.userContentController.add(context.coordinator, name: "teachingViewpoint")
+        configuration.userContentController.addUserScript(WKUserScript(
+            source: NativeAssistantEntryController.presentationScript,
+            injectionTime: .atDocumentEnd, forMainFrameOnly: true
+        ))
         if entryController != nil {
             configuration.userContentController.addUserScript(WKUserScript(
                 source: NativeAssistantEntryController.script,

@@ -154,4 +154,19 @@ final class NativeAssistantEntryController: ObservableObject {
       publish();
     })();
     """#
+
+    // Presentation only: preserve course, progress, error and interaction text.
+    // Static expert descriptions are also detached from their button hints.
+    static let presentationScript = #"""
+    (() => {
+      if (!window.webkit?.messageHandlers?.nativeVision) return;
+      const style = document.createElement('style');
+      style.textContent = '#main-content>header>p:not([id]),#expert-buttons>p,#teaching-preparation-choice>p,#teaching-instructions,#teaching-live-transport-help{display:none!important}';
+      document.head.appendChild(style);
+      for (const button of document.querySelectorAll('#expert-buttons [data-expert-profile-id]')) {
+        button.removeAttribute('aria-describedby');
+      }
+      document.getElementById('teaching-live-transport')?.removeAttribute('aria-describedby');
+    })();
+    """#
 }

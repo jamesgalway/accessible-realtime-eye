@@ -20,6 +20,8 @@ struct WebAssistantView: View {
     }
 
     var body: some View {
+        GeometryReader { viewport in
+        ScrollView {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 backendButton(.aliyun)
@@ -94,6 +96,7 @@ struct WebAssistantView: View {
 
             if screenSharingMode {
                 ScreenShareView(backend: selectedBackend, controller: screenSharing)
+                    .frame(height: max(320, viewport.size.height - 270))
             } else {
             GreenCloudWebView(
                 url: selectedURL,
@@ -114,9 +117,14 @@ struct WebAssistantView: View {
                 presentationSection: selectedSection.rawValue
             )
             .id("\(selectedBackend.rawValue):\(selectedSection.rawValue)")
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(maxWidth: .infinity)
+            .frame(height: max(320, viewport.size.height - 270))
             .accessibilityIdentifier("nativeWebContent")
             }
+        }
+        .frame(minHeight: viewport.size.height, alignment: .top)
+        }
+        .accessibilityIdentifier("nativeAppScroll")
         }
         .alert(
             "闪光灯不可用",
