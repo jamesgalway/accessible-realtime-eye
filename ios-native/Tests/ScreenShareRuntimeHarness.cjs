@@ -38,11 +38,17 @@ function runtime(backend, adapter = true) {
       case 'cancelTimer': clearTimeout(nativeTimers.get(m.id)); nativeTimers.delete(m.id); break;
       case 'fetch': setImmediate(() => {
         const health = { ok: true, appVariant: backend === 'aliyun' ? 'aliyun' : 'greencloud-gemini', geminiConfigured: true, realtimeWebSocketConfigured: true, bailianConfigured: true };
-        const body = m.url.includes('/api/health') ? health : m.url.includes('generateContent')
-          ? { candidates: [{ content: { parts: [{ text: 'verified response' }] } }] } : { ok: true };
+        const body = m.url.includes('/api/health') ? health
+          : m.url.includes('/api/realtime/config') ? { webSocketConfigured: true, serverApiKeyConfigured: true }
+          : m.url.includes('/api/gemini-browser-config') ? { configured: true, apiKey: 'test-only-key', model: 'test', voice: 'Zephyr' }
+          : m.url.includes('/api/web-search') ? { results: [{ title: 'verified title', snippet: 'verified snippet', url: 'https://example.test/source' }] }
+          : m.url.includes('generateContent') ? { candidates: [{ content: { parts: [{ text: 'verified response' }] } }] } : { ok: true };
         event({ kind: 'fetch', id: m.id, status: 200, body: JSON.stringify(body), headers: { 'content-type': 'application/json' } });
       }); break;
-      case 'socket': setImmediate(() => event({ kind: 'socket', id: m.id, type: 'open' })); break;
+      case 'socket': setImmediate(() => {
+        event({ kind: 'socket', id: m.id, type: 'open' });
+        if (m.url.includes('/api/ws')) event({ kind: 'socket', id: m.id, type: 'message', data: '{"type":"proxy.ready","model":"test"}' });
+      }); break;
       case 'socketSend': if (JSON.parse(m.data).setup) setImmediate(() => event({ kind: 'socket', id: m.id, type: 'message', data: '{"setupComplete":{}}' })); break;
       case 'socketClose': setImmediate(() => event({ kind: 'socket', id: m.id, type: 'close', code: 1000 })); break;
     }
@@ -90,6 +96,22 @@ function runtime(backend, adapter = true) {
       candidate.run('session.close()');
       await flush();
       check(candidate.run('typeof HuiyanWebSearch.createController') === 'function', 'search controller available');
+      await candidate.run('__screenCommand("start")');
+      await flush(); await flush();
+      check(candidate.run('__screenSnapshot().connected') === true, backend + ' original entry starts through native adapter');
+      check(candidate.run('!!(appState.realtime?.audioProcessor || appState.geminiReminder?.audioProcessor)'), 'native microphone attaches to original input handler');
+      const audioBefore = candidate.commands.filter(x => x.op === 'socketSend').length;
+      candidate.event({ kind: 'pcm', data: Buffer.alloc(6400).toString('base64') });
+      check(candidate.commands.filter(x => x.op === 'socketSend').length > audioBefore, 'native microphone reaches actual live transport');
+      candidate.run('globalThis.searchReply = null; globalThis.searchController = HuiyanWebSearch.createController({session:{sendToolResponse:x=>{searchReply=x}},isCurrent:()=>true}); searchController.handle({toolCall:{functionCalls:[{id:"search-test",name:"search_web",args:{query:"test"}}]}})');
+      await flush(); await flush();
+      check(candidate.run('searchReply.functionResponses[0].response.results[0].snippet') === 'verified snippet', 'real search request and result delivery works through native fetch');
+      check(candidate.commands.some(x => x.op === 'fetch' && x.url === '/api/web-search'), 'search uses original server endpoint');
+      candidate.run('searchController.close(); __screenCommand("stop")');
+      await flush();
+      const stoppedAt = candidate.commands.filter(x => x.op === 'socketSend').length;
+      candidate.event({ kind: 'pcm', data: Buffer.alloc(6400).toString('base64') });
+      check(candidate.commands.filter(x => x.op === 'socketSend').length === stoppedAt, 'stopped entry discards native microphone input');
     } finally { candidate.close(); baseline.close(); }
   }
   console.log('Screen sharing runtime:', checks, 'behavior checks passed; no live model calls.');

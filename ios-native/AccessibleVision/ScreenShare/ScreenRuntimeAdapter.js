@@ -2,6 +2,12 @@
 (function () {
   'use strict';
   const host = __screenHostCall;
+  const screenSessionID = crypto.randomUUID();
+  setInterval(() => {
+    if (appState.realtime || appState.geminiReminder) {
+      logClientEvent('screen_share.native_media', { screenSessionID, backend: __screenBackend, ...host('diagnostics') });
+    }
+  }, 10000);
   const disconnectable = () => ({ disconnect() {} });
   // Capture and playback use native devices; the existing 16 kHz input handlers,
   // 3200-byte packetizer, PcmPlayer, contracts and delivery callbacks remain intact.

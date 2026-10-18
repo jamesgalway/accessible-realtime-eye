@@ -10,6 +10,9 @@ final class ScreenBroadcastReceiver {
     private var timer: Timer?
     private var lastPacket = Date()
     private(set) var image: UIImage?
+    private(set) var frameCount = 0
+    private var lastFrame: Date?
+    var frameAge: Double? { lastFrame.map { Date().timeIntervalSince($0) } }
     var onFrame: (() -> Void)?
     var onEnd: ((String) -> Void)?
 
@@ -40,7 +43,7 @@ final class ScreenBroadcastReceiver {
             }
             self.lastPacket = Date()
             if type == 2, let image = UIImage(data: payload) {
-                self.image = image; self.onFrame?()
+                self.image = image; self.frameCount += 1; self.lastFrame = Date(); self.onFrame?()
             } else if type == 3 || type == 5 {
                 self.onEnd?(type == 3 ? "系统已暂停屏幕共享，请重新开始。" : "屏幕共享已结束。")
             }
@@ -74,6 +77,7 @@ final class ScreenBroadcastReceiver {
         timer?.invalidate(); timer = nil
         let old = reader; reader = nil; old?.finish()
         listener?.cancel(); listener = nil; image = nil; authenticated = false
+        frameCount = 0; lastFrame = nil
     }
     deinit { stop() }
 }

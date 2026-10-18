@@ -65,7 +65,8 @@ targets:
         NSExtension:
           NSExtensionPointIdentifier: com.apple.broadcast-services-upload
           NSExtensionPrincipalClass: "$(PRODUCT_MODULE_NAME).SampleHandler"
-          RPBroadcastProcessMode: RPBroadcastProcessModeSampleBuffer
+          NSExtensionAttributes:
+            RPBroadcastProcessMode: RPBroadcastProcessModeSampleBuffer
     settings:
       base:
         PRODUCT_NAME: ScreenBroadcastExtension

@@ -2,6 +2,7 @@ import Foundation
 import JavaScriptCore
 import WebKit
 import Security
+import UIKit
 
 final class ScreenShareRuntime: NSObject, URLSessionWebSocketDelegate {
     private var context: JSContext?
@@ -76,6 +77,12 @@ final class ScreenShareRuntime: NSObject, URLSessionWebSocketDelegate {
             return bytes
         case "hasFrame": return receiver.image != nil
         case "frameSize": return ["width": receiver.image?.size.width ?? 0, "height": receiver.image?.size.height ?? 0]
+        case "diagnostics":
+            var result = audio.diagnostics
+            result["frameCount"] = receiver.frameCount
+            result["frameAgeSeconds"] = receiver.frameAge
+            result["applicationState"] = UIApplication.shared.applicationState.rawValue
+            return result
         case "capture": return receiver.capture(width: message["width"] as? Double ?? 320, quality: message["quality"] as? Double ?? 0.45)
         case "encodeBase64":
             guard let text = message["value"] as? String else { return "" }

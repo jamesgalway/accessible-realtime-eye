@@ -11,6 +11,16 @@ final class ScreenShareAudio: NSObject, AVSpeechSynthesizerDelegate {
     private var running = false
     private var ownsSession = false
     private var tapInstalled = false
+    private(set) var inputBytes = 0
+    private(set) var queuedPackets = 0
+    private(set) var playedPackets = 0
+    var diagnostics: [String: Any] {
+        let session = AVAudioSession.sharedInstance()
+        return ["inputBytes": inputBytes, "queuedPackets": queuedPackets, "playedPackets": playedPackets,
+                "running": running, "voiceProcessing": engine.inputNode.isVoiceProcessingEnabled,
+                "category": session.category.rawValue, "mode": session.mode.rawValue,
+                "outputs": session.currentRoute.outputs.map { $0.portType.rawValue }]
+    }
     private var observation: NSObjectProtocol?
     var onInput: ((Data) -> Void)?
     var onPlayed: ((Int) -> Void)?
@@ -28,7 +38,8 @@ final class ScreenShareAudio: NSObject, AVSpeechSynthesizerDelegate {
         try Task.checkCancellation()
         guard permitted else { throw NSError(domain: "ScreenShare", code: 1, userInfo: [NSLocalizedDescriptionKey: "请在系统设置中允许慧眼使用麦克风。"] ) }
         let session = AVAudioSession.sharedInstance()
-        // Do not duck or interrupt the foreground video's audio or VoiceOver.
+        // Mix with the foreground video's audio and VoiceOver. Voice processing
+        // can still reduce other audio; use its minimum ducking level below.
         try session.setCategory(.playAndRecord, mode: .default,
                                 options: [.mixWithOthers, .defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP])
         try session.setActive(true)
@@ -65,6 +76,7 @@ final class ScreenShareAudio: NSObject, AVSpeechSynthesizerDelegate {
             let data = Data(bytes: samples, count: Int(output.frameLength) * 2)
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.running else { return }
+                self.inputBytes += data.count
                 self.onInput?(data)
             }
         }
@@ -95,11 +107,13 @@ final class ScreenShareAudio: NSObject, AVSpeechSynthesizerDelegate {
             }
         }
         let ticket = generation
+        queuedPackets += 1
         // Completion is hardware playback completion, never enqueue acceptance.
         let when = AVAudioTime(hostTime: mach_absolute_time() + AVAudioTime.hostTime(forSeconds: max(0, delay)))
         player.scheduleBuffer(buffer, at: when, options: [], completionCallbackType: .dataPlayedBack) { [weak self] _ in
             DispatchQueue.main.async {
                 guard let self, self.running, self.generation == ticket, self.activeContext == context else { return }
+                self.playedPackets += 1
                 self.onPlayed?(id)
             }
         }
