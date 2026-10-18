@@ -104,6 +104,12 @@ function runtime(backend, adapter = true, googleRoute = 'direct') {
         check(candidate.commands.some(x => x.op === 'fetch' && x.url === '/api/gemini-browser-config?directScreen=1'), 'Google uses the original authorized direct-screen configuration');
         check(candidate.run('appState.geminiReminder.activeScreenTransport') === 'browser_direct_generate_content', 'Google screening uses the original direct route');
         check(candidate.run('appState.geminiReminder.transport') === 'browser-direct', 'Google live uses direct SDK connection');
+        await baseline.run('(async()=>{await checkHealth(); await startBrowserDirectUnifiedAssistant();})()');
+        await flush(); await flush();
+        const originalSetup=baseline.commands.filter(x => x.op === 'socketSend' && JSON.parse(x.data).setup).at(-1);
+        const screenSetup=candidate.commands.filter(x => x.op === 'socketSend' && JSON.parse(x.data).setup).at(-1);
+        assert.deepEqual(JSON.parse(screenSetup.data),JSON.parse(originalSetup.data),'screen and original Huiyan direct SDK setup are identical'); checks++;
+        assert.equal(candidate.commands.filter(x => x.op === 'socket').at(-1).url,baseline.commands.filter(x => x.op === 'socket').at(-1).url,'screen and original Huiyan direct WSS addresses are identical'); checks++;
       } else {
         check(candidate.run('isAliRealtimeVideoExperiment()') === true, 'Ali uses original continuous realtime video entry');
         const beforeFrames = candidate.commands.filter(x => x.op === 'socketSend' && JSON.parse(x.data).type === 'input_image_buffer.append').length;

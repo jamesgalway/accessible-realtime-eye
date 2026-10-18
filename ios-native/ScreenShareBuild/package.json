@@ -2,5 +2,8 @@
   "private": true,
   "name": "huiyan-native-screen-runtime-build",
   "version": "1.0.0",
-  "dependencies": { "@google/genai": "1.46.0", "esbuild": "0.28.2" }
+  "dependencies": {
+    "@google/genai": "1.52.0",
+    "esbuild": "0.28.2"
+  }
 }
