@@ -1,12 +1,14 @@
 from pathlib import Path
-import json,subprocess,sys
+import json,subprocess,sys,os
 
 root=Path(__file__).resolve().parents[1]
 devices=json.loads(subprocess.check_output(['xcrun','simctl','list','devices','available','--json']))
 choices=[(runtime,device) for runtime,items in devices['devices'].items() if 'iOS' in runtime
+         and runtime.endswith(os.environ.get('HUIYAN_UI_SIM_RUNTIME',''))
          for device in items if device['name'].startswith('iPhone') and device.get('isAvailable')]
 assert choices,'No available iPhone simulator'
 runtime,device=choices[0]
+print('UI check runtime:', runtime, device['name'],flush=True)
 # The runner's precreated device stalled twice in CoreLocation data migration.
 # Use a clean temporary simulator, leaving all precreated device data alone.
 device_type=device.get('deviceTypeIdentifier')
