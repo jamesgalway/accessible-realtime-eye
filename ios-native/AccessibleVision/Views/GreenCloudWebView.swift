@@ -8,6 +8,7 @@ struct GreenCloudWebView: UIViewRepresentable {
     let onMediaCaptureRequested: () -> Void
     let onMediaCaptureReleased: () -> Void
     var entryController: NativeAssistantEntryController? = nil
+    var presentationSection: String = "assistant"
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -26,7 +27,7 @@ struct GreenCloudWebView: UIViewRepresentable {
         configuration.websiteDataStore = .default()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         configuration.userContentController.addUserScript(WKUserScript(
-            source: "window.__ACCESSIBLE_VISION_BACKEND__ = '\(backend.rawValue)';",
+            source: "window.__ACCESSIBLE_VISION_BACKEND__ = '\(backend.rawValue)'; window.__ACCESSIBLE_VISION_SECTION__ = '\(presentationSection)';",
             injectionTime: .atDocumentStart,
             forMainFrameOnly: true
         ))

@@ -48,7 +48,7 @@ final class ScreenShareController: ObservableObject {
                 guard let self, self.identity == identity else { runtime.stop(); return }
                 try runtime.receiver.start()
                 self.preparing = false; self.prepared = true
-                self.status = "即将打开系统广播面板。选择开始广播后，可以切到其他应用。"
+                self.status = "请在系统面板开始广播。"
                 self.broadcastPresentation += 1
                 let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
                     guard let self, self.identity == identity, self.started else { return }
@@ -137,7 +137,6 @@ private final class ScreenBroadcastPickerHost: UIView {
         picker.showsMicrophoneButton = false
         for button in picker.subviews.compactMap({ $0 as? UIButton }) {
             button.accessibilityLabel = "开始屏幕共享"
-            button.accessibilityHint = "在系统面板选择开始广播，然后切换到需要查看的应用。"
         }
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }

@@ -3,14 +3,22 @@ import json,subprocess,sys
 
 root=Path(__file__).resolve().parents[1]
 devices=json.loads(subprocess.check_output(['xcrun','simctl','list','devices','available','--json']))
-choices=[device for runtime,items in devices['devices'].items() if 'iOS' in runtime
+choices=[(runtime,device) for runtime,items in devices['devices'].items() if 'iOS' in runtime
          for device in items if device['name'].startswith('iPhone') and device.get('isAvailable')]
 assert choices,'No available iPhone simulator'
-device=choices[0]
-subprocess.run(['xcrun','simctl','bootstatus',device['udid'],'-b'],check=True,timeout=180)
+runtime,device=choices[0]
+# The runner's precreated device stalled twice in CoreLocation data migration.
+# Use a clean temporary simulator, leaving all precreated device data alone.
+device_type=device.get('deviceTypeIdentifier')
+if not device_type:
+    types=json.loads(subprocess.check_output(['xcrun','simctl','list','devicetypes','--json']))
+    device_type=next(item['identifier'] for item in types['devicetypes'] if item['name']==device['name'])
+udid=subprocess.check_output(['xcrun','simctl','create','HuiyanEntryAccessibility',device_type,runtime]).decode().strip()
+assert len(udid)==36
+subprocess.run(['xcrun','simctl','bootstatus',udid,'-b'],check=True,timeout=180)
 log=root/'entry-accessibility-test.log'
 command=['xcodebuild','-project','AccessibleVision.xcodeproj','-scheme','NativeEntryAccessibility',
-    '-configuration','Debug','-destination','platform=iOS Simulator,id='+device['udid'],
+    '-configuration','Debug','-destination','platform=iOS Simulator,id='+udid,
     '-derivedDataPath','entry-test-build','CODE_SIGNING_ALLOWED=NO','test']
 with log.open('w',encoding='utf-8',newline='\n') as output:
     result=subprocess.run(command,cwd=root,stdout=output,stderr=subprocess.STDOUT,timeout=480)

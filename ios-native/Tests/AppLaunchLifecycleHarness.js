@@ -35,7 +35,7 @@ assert.doesNotMatch(
 );
 assert.match(view, /backendButton\(\.greenCloud\)/);
 assert.match(view, /backendButton\(\.aliyun\)/);
-assert.match(view, /teachingButton/);
+assert.match(view, /sectionButton\(\.teaching/);
 assert.doesNotMatch(configuration, /case teachingTest/);
 assert.match(configuration, /case \.greenCloud:[\s\S]*?return "greencloud_google"/);
 assert.match(configuration, /case \.aliyun:[\s\S]*?return "aliyun_google"/);
@@ -68,17 +68,17 @@ assert.match(
 assert.match(view, /UIApplication\.shared\.isIdleTimerDisabled = disabled/);
 assert.match(
   view,
-  /guard selectedBackend != backend \|\| teachingMode \|\| screenSharingMode else \{ return \}[\s\S]*?stopCurrentPageMedia\(\)[\s\S]*?selectedBackend = backend[\s\S]*?teachingMode = false/,
+  /guard selectedBackend != backend else \{ return \}[\s\S]*?stopCurrentPageMedia\(\)[\s\S]*?selectedBackend = backend[\s\S]*?screenSharingMode = false/,
   'Switching backends must stop the previous native media session.'
 );
 assert.match(
   view,
-  /Button\("教学"\)[\s\S]*?guard !teachingMode else \{ return \}[\s\S]*?stopCurrentPageMedia\(\)[\s\S]*?teachingMode = true/,
+  /private func sectionButton[\s\S]*?guard selectedSection != section \|\| screenSharingMode else \{ return \}[\s\S]*?stopCurrentPageMedia\(\)[\s\S]*?selectedSection = section/,
   'Teaching must bind the already selected backend instead of acting as a third backend.'
 );
 assert.match(
   view,
-  /当前教学入口，绑定\\\(selectedBackend\.title\)/,
+  /已选择，\\\(selectedBackend\.title\)/,
   'VoiceOver must announce which backend the teaching entry is bound to.'
 );
 assert.match(
@@ -107,12 +107,18 @@ assert.match(view, /Button\("实时慧眼"\) \{ openAssistant\(\.unified\) \}/);
 assert.match(view, /Button\("直连筛图"\) \{ openAssistant\(\.directScreen\) \}/);
 assert.match(view, /entryController: !teachingMode \? assistantEntries : nil/);
 assert.match(view, /Button\("屏幕共享"\)/);
-assert.match(view, /if screenSharingMode \{\s*Button\("返回慧眼"\)/);
+assert.match(view, /Button\("结束慧眼"\)[\s\S]*?assistantEntries\.start\(\.stop, backend: selectedBackend\)/);
 assert.doesNotMatch(view, /accessibilityElement\(children:/);
 assert.ok(view.indexOf('backendButton(.aliyun)') < view.indexOf('backendButton(.greenCloud)'));
-assert.ok(view.indexOf('teachingButton\n') < view.indexOf('Button("屏幕共享")'));
-assert.ok(view.indexOf('Button("屏幕共享")') < view.indexOf('Button("实时慧眼")'));
-assert.ok(view.indexOf('Button("实时慧眼")') < view.indexOf('Button("直连筛图")'));
+const orderedControls = ['backendButton(.aliyun)', 'backendButton(.greenCloud)', 'AccessibleTorchButton(',
+  'sectionButton(.assistant', 'sectionButton(.navigation', 'sectionButton(.teaching',
+  'Button("实时慧眼")', 'Button("直连筛图")', 'Button("屏幕共享")', 'Button("结束慧眼")'];
+const indices = orderedControls.map(label => view.indexOf(label));
+assert.ok(indices.every(index => index >= 0));
+assert.deepEqual([...indices].sort((a,b)=>a-b),indices);
+assert.match(view, /selectedSection: Section = \.assistant/);
+assert.match(view, /selectedBackend == backend/);
+assert.match(view, /accessibilityAddTraits\(isSelected \? \.isSelected : \[\]\)/);
 assert.match(webView, /webView\.isAccessibilityElement = false/);
 assert.match(webView, /webView\.accessibilityElementsHidden = false/);
 assert.match(webView, /UIAccessibility\.post\(notification: \.layoutChanged, argument: nil\)/);
