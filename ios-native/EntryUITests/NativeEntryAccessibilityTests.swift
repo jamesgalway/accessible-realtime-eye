@@ -53,7 +53,15 @@ final class NativeEntryAccessibilityTests: XCTestCase {
         XCTAssertFalse(assistant.isSelected)
         XCTAssertFalse(unified.exists)
         XCTAssertFalse(app.buttons["nativeScreenShareButton"].exists)
-        XCTAssertTrue(app.webViews.firstMatch.textFields.firstMatch.waitForExistence(timeout: 30))
+        let city = app.webViews.firstMatch.textFields.firstMatch
+        XCTAssertTrue(city.waitForExistence(timeout: 30))
+        let oldCity = city.value as? String ?? ""
+        city.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        city.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: oldCity.count) + "NATIVE-CHECK")
+        assistant.tap()
+        navigation.tap()
+        XCTAssertTrue(city.waitForExistence(timeout: 20))
+        XCTAssertEqual(city.value as? String, "NATIVE-CHECK", "Changing native sections must preserve the existing route form")
         teaching.tap()
         XCTAssertTrue(teaching.isSelected)
         XCTAssertFalse(navigation.isSelected)

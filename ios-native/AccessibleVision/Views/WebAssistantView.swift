@@ -116,7 +116,7 @@ struct WebAssistantView: View {
                 entryController: !teachingMode ? assistantEntries : nil,
                 presentationSection: selectedSection.rawValue
             )
-            .id("\(selectedBackend.rawValue):\(selectedSection.rawValue)")
+            .id("\(selectedBackend.rawValue):\(teachingMode ? "teaching" : "assistant")")
             .frame(maxWidth: .infinity)
             .frame(height: max(320, viewport.size.height - 270))
             .accessibilityIdentifier("nativeWebContent")
@@ -176,6 +176,9 @@ struct WebAssistantView: View {
         let isSelected = selectedSection == section
         return Button(title) {
             guard selectedSection != section || screenSharingMode else { return }
+            if !teachingMode && section != .teaching && assistantEntries.stopAvailable {
+                assistantEntries.start(.stop, backend: selectedBackend)
+            }
             stopCurrentPageMedia()
             selectedSection = section
             screenSharingMode = false

@@ -16,7 +16,8 @@ struct GreenCloudWebView: UIViewRepresentable {
             camera: camera,
             onMediaCaptureRequested: onMediaCaptureRequested,
             onMediaCaptureReleased: onMediaCaptureReleased,
-            entryController: entryController
+            entryController: entryController,
+            presentationSection: presentationSection
         )
     }
 
@@ -79,6 +80,7 @@ struct GreenCloudWebView: UIViewRepresentable {
 
     func updateUIView(_ webView: WKWebView, context: Context) {
         context.coordinator.attach(to: webView)
+        context.coordinator.updatePresentationSection(presentationSection, in: webView)
     }
 
     static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
@@ -105,13 +107,16 @@ struct GreenCloudWebView: UIViewRepresentable {
         private var latestPacket: NativeVisionFramePacket?
         private var accessTask: Task<Void, Never>?
         private let entryController: NativeAssistantEntryController?
+        private var presentationSection: String
+        private var appliedSection: String?
 
         init(
             origin: URL,
             camera: NativeCameraService,
             onMediaCaptureRequested: @escaping () -> Void,
             onMediaCaptureReleased: @escaping () -> Void,
-            entryController: NativeAssistantEntryController?
+            entryController: NativeAssistantEntryController?,
+            presentationSection: String
         ) {
             self.origin = origin
             self.location = NativeLocationBridge(origin: origin)
@@ -121,6 +126,7 @@ struct GreenCloudWebView: UIViewRepresentable {
             self.onMediaCaptureRequested = onMediaCaptureRequested
             self.onMediaCaptureReleased = onMediaCaptureReleased
             self.entryController = entryController
+            self.presentationSection = presentationSection
         }
 
         func attach(to webView: WKWebView) {
@@ -209,8 +215,20 @@ struct GreenCloudWebView: UIViewRepresentable {
             webReady = false
         }
 
+        func updatePresentationSection(_ section: String, in webView: WKWebView) {
+            presentationSection = section
+            guard entryController != nil, webReady, appliedSection != section else { return }
+            appliedSection = section
+            webView.callAsyncJavaScript(
+                "document.documentElement.dataset.nativeSection = section;",
+                arguments: ["section": section], in: nil, in: .page, completionHandler: nil
+            )
+        }
+
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             webReady = true
+            appliedSection = nil
+            updatePresentationSection(presentationSection, in: webView)
             webView.evaluateJavaScript("""
                 window.__ACCESSIBLE_VISION_NATIVE_IOS__ = true;
                 window.__accessibleVisionEnableRuntimeHooks?.();
