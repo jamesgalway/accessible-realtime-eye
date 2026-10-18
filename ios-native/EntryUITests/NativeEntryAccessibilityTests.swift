@@ -9,18 +9,20 @@ final class NativeEntryAccessibilityTests: XCTestCase {
         XCTAssertTrue(unified.waitForExistence(timeout: 20))
         XCTAssertTrue(direct.exists)
         XCTAssertTrue(app.buttons["屏幕共享"].exists)
-        XCTAssertTrue(unified.isHittable)
-        XCTAssertTrue(direct.isHittable)
         XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 30))
         let enabled = NSPredicate(format: "enabled == true")
         expectation(for: enabled, evaluatedWith: unified)
         expectation(for: enabled, evaluatedWith: direct)
         waitForExpectations(timeout: 30)
+        XCTAssertTrue(unified.isHittable)
+        XCTAssertTrue(direct.isHittable)
         XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label == %@", "实时慧眼")).count, 1)
         XCTAssertFalse(app.staticTexts["实时慧眼与无障碍导航"].exists)
         XCTAssertTrue(app.webViews.firstMatch.textFields.firstMatch.exists)
-        let ordered = app.buttons.allElementsBoundByIndex.map { $0.label }
         let expected = ["阿里百炼", "Gemini版", "教学", "屏幕共享", "实时慧眼", "直连筛图"]
+        // Exclude the live web page's changing controls from this native order check.
+        let ordered = app.buttons.matching(NSPredicate(format: "label IN %@", expected))
+            .allElementsBoundByIndex.map { $0.label }
         let positions = expected.compactMap { ordered.firstIndex(of: $0) }
         XCTAssertEqual(positions.count, expected.count)
         XCTAssertEqual(positions, positions.sorted())
