@@ -8,6 +8,7 @@ final class ScreenShareRuntime: NSObject, URLSessionWebSocketDelegate {
     private var context: JSContext?
     private var network: URLSession?
     private var baseURL: URL?
+    private var enrolledCookies: [HTTPCookie] = []
     private var timers: [Int: Timer] = [:]
     private var requests: [Int: URLSessionDataTask] = [:]
     private var sockets: [Int: URLSessionWebSocketTask] = [:]
@@ -25,6 +26,7 @@ final class ScreenShareRuntime: NSObject, URLSessionWebSocketDelegate {
         try Task.checkCancellation()
         guard ticket == generation else { throw CancellationError() }
         baseURL = backend.baseURL
+        enrolledCookies = cookies
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 65
         config.timeoutIntervalForResource = 90
@@ -170,13 +172,8 @@ final class ScreenShareRuntime: NSObject, URLSessionWebSocketDelegate {
         guard let network, sockets.count < 8, let url = trustedURL(message["url"] as? String ?? "", socket: true) else {
             event(["kind": "socket", "id": id, "type": "error", "message": "连接地址不可用"]); return
         }
-        var request = URLRequest(url: url)
-        // Secure cookies match HTTPS origins, so explicitly map only our own WSS
-        // origin to its enrolled HTTPS cookie. Never forward it to Google.
-        if url.host == baseURL?.host, let baseURL,
-           let cookies = network.configuration.httpCookieStorage?.cookies(for: baseURL) {
-            for (name, value) in HTTPCookie.requestHeaderFields(with: cookies) { request.setValue(value, forHTTPHeaderField: name) }
-        }
+        guard let baseURL else { return }
+        let request = ScreenShareWebSocketRequest.make(url: url, baseURL: baseURL, enrolledCookies: enrolledCookies)
         let task = network.webSocketTask(with: request)
         task.maximumMessageSize = 8_000_000
         sockets[id] = task; task.resume(); receive(task, id: id, ticket: generation)
@@ -216,6 +213,7 @@ final class ScreenShareRuntime: NSObject, URLSessionWebSocketDelegate {
         requests.values.forEach { $0.cancel() }; requests.removeAll()
         sockets.values.forEach { $0.cancel(with: .goingAway, reason: nil) }; sockets.removeAll()
         network?.invalidateAndCancel(); network = nil
+        enrolledCookies.removeAll()
         context = nil
         receiver.stop(); audio.stop()
     }

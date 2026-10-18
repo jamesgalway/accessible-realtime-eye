@@ -33,6 +33,11 @@ jobs:
       - name: Verify native JavaScriptCore compatibility
         run: swift ios-native/Tests/ScreenShareJSCoreSmoke.swift ios-native
 
+      - name: Verify native screen WebSocket enrollment
+        run: |
+          swiftc ios-native/AccessibleVision/ScreenShare/ScreenShareWebSocketRequest.swift ios-native/Tests/ScreenShareCookie/main.swift -o "$RUNNER_TEMP/huiyan-screen-cookie-check"
+          "$RUNNER_TEMP/huiyan-screen-cookie-check"
+
       - name: Add private native authorization resource
         env:
           HUIYAN_NATIVE_ACCESS_BOOTSTRAP: ${{ secrets.HUIYAN_NATIVE_ACCESS_BOOTSTRAP }}
