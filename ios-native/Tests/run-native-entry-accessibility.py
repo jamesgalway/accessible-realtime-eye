@@ -23,13 +23,18 @@ command=['xcodebuild','-project','AccessibleVision.xcodeproj','-scheme','NativeE
     '-configuration','Debug','-destination','platform=iOS Simulator,id='+udid,
     '-derivedDataPath','entry-test-build','CODE_SIGNING_ALLOWED=NO','test']
 with log.open('w',encoding='utf-8',newline='\n') as output:
-    result=subprocess.run(command,cwd=root,stdout=output,stderr=subprocess.STDOUT,timeout=480)
+    try:
+        result=subprocess.run(command,cwd=root,stdout=output,stderr=subprocess.STDOUT,timeout=480)
+        returncode=result.returncode
+    except subprocess.TimeoutExpired:
+        print('The simulator test process timed out; preserving its actual final log.',flush=True)
+        returncode=124
 lines=log.read_text(encoding='utf-8',errors='replace').splitlines()
-if result.returncode:
+if returncode:
     for index,line in enumerate(lines):
         if 'error:' in line or 'XCTAssert' in line or 'Asynchronous wait failed' in line:
             print('\n'.join(lines[max(0,index-1):index+3]))
     print('\n'.join(lines[-90:]))
-    sys.exit(result.returncode)
+    sys.exit(returncode)
 print('\n'.join(line for line in lines if 'Test Case' in line or 'TEST SUCCEEDED' in line))
 print('Native Google entry controls and web content are exposed together in the actual iPhone simulator accessibility tree; no model started.')
