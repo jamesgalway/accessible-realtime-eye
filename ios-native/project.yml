@@ -94,6 +94,10 @@ targets:
     dependencies:
       - target: AccessibleVision
 schemes:
+  AccessibleVision:
+    build:
+      targets:
+        AccessibleVision: all
   NativeEntryAccessibility:
     build:
       targets:
