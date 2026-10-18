@@ -93,7 +93,7 @@ assert.match(webView, /nativeMediaReleased/);
 assert.match(bridge, /postNative\(\{ type: 'requestNativeMediaStart' \}\)/);
 assert.match(bridge, /postNative\(\{ type: 'nativeMediaReleased' \}\)/);
 
-assert.match(view, /if screenSharingMode \{\s*ScreenShareView\(backend: selectedBackend, controller: screenSharing\)\s*\} else \{\s*GreenCloudWebView\(/);
+assert.match(view, /if screenSharingMode \{\s*ScreenShareView\(backend: selectedBackend, controller: screenSharing\)\s*\.frame\(height: max\(320, viewport\.size\.height - 270\)\)\s*\} else \{\s*GreenCloudWebView\(/);
 assert.match(view, /private func stopCurrentPageMedia\(\) \{\s*screenSharing\.stop\(\)/);
 const backgroundHandler = view.slice(view.indexOf('.onChange(of: scenePhase)'), view.indexOf('private func backendButton'));
 assert.doesNotMatch(backgroundHandler, /screenSharing\.stop/);
