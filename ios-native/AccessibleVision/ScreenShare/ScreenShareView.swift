@@ -9,6 +9,7 @@ final class ScreenShareController: ObservableObject {
     @Published private(set) var status = "尚未开始屏幕共享。"
     @Published private(set) var transcript = ""
     @Published private(set) var stopLabel = "停止当前任务"
+    @Published private(set) var broadcastPresentation = 0
     private var runtime: ScreenShareRuntime?
     private var task: Task<Void, Never>?
     private var poll: Timer?
@@ -45,7 +46,8 @@ final class ScreenShareController: ObservableObject {
                 guard let self, self.identity == identity else { runtime.stop(); return }
                 try runtime.receiver.start()
                 self.preparing = false; self.prepared = true
-                self.status = "准备完成。点下面的系统屏幕共享按钮，再选择开始广播；随后可以切到其他应用。"
+                self.status = "即将打开系统广播面板。选择开始广播后，可以切到其他应用。"
+                self.broadcastPresentation += 1
                 let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
                     guard let self, self.identity == identity, self.started else { return }
                     let snapshot = runtime.snapshot()
@@ -81,10 +83,10 @@ struct ScreenShareView: View {
                 Text("当前使用\(backend.title)。可以询问屏幕内容、设置主动提醒，或使用持续播报；普通问答保留联网搜索。")
                 Text(controller.status)
                 if !controller.prepared {
-                    Button(controller.preparing ? "正在准备" : "准备屏幕共享") { controller.prepare(backend: backend) }
+                    Button(controller.preparing ? "正在准备" : "开始屏幕共享") { controller.prepare(backend: backend) }
                         .disabled(controller.preparing)
                 } else {
-                    ScreenBroadcastPicker()
+                    ScreenBroadcastPicker(presentationRequest: controller.broadcastPresentation)
                         .frame(height: 54)
                     if controller.started && controller.stopLabel.contains("持续播报") {
                         Button(controller.stopLabel) { controller.stopTask() }
@@ -100,25 +102,62 @@ struct ScreenShareView: View {
             .buttonStyle(.bordered)
             .padding()
         }
+        .task { controller.prepare(backend: backend) }
     }
 }
 
 private struct ScreenBroadcastPicker: UIViewRepresentable {
-    func makeUIView(context: Context) -> RPSystemBroadcastPickerView {
-        let view = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 54, height: 54))
+    let presentationRequest: Int
+    func makeUIView(context: Context) -> ScreenBroadcastPickerHost { ScreenBroadcastPickerHost() }
+    func updateUIView(_ uiView: ScreenBroadcastPickerHost, context: Context) {
+        uiView.requestPresentation(presentationRequest)
+    }
+}
+
+/// Present once after preparation and attachment to the window. Returning from
+/// the system panel or a SwiftUI update must not open it again automatically.
+private final class ScreenBroadcastPickerHost: UIView {
+    private let picker = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 54, height: 54))
+    private var pendingPresentation = 0
+    private var handledPresentation = 0
+
+    init() {
+        super.init(frame: .zero)
+        addSubview(picker)
         // Derive from the installed identifier because personal signing may
         // rewrite the container and extension bundle IDs together.
         if let plugins = Bundle.main.builtInPlugInsURL,
            let files = try? FileManager.default.contentsOfDirectory(at: plugins, includingPropertiesForKeys: nil),
            let extensionURL = files.first(where: { $0.pathExtension == "appex" }), let bundle = Bundle(url: extensionURL) {
-            view.preferredExtension = bundle.bundleIdentifier
+            picker.preferredExtension = bundle.bundleIdentifier
         }
-        view.showsMicrophoneButton = false
-        for button in view.subviews.compactMap({ $0 as? UIButton }) {
-            button.accessibilityLabel = "打开系统屏幕共享"
+        picker.showsMicrophoneButton = false
+        for button in picker.subviews.compactMap({ $0 as? UIButton }) {
+            button.accessibilityLabel = "开始屏幕共享"
             button.accessibilityHint = "在系统面板选择开始广播，然后切换到需要查看的应用。"
         }
-        return view
     }
-    func updateUIView(_ uiView: RPSystemBroadcastPickerView, context: Context) {}
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        picker.frame = CGRect(x: (bounds.width - 54) / 2, y: 0, width: 54, height: 54)
+    }
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        presentPendingRequest()
+    }
+    func requestPresentation(_ request: Int) {
+        pendingPresentation = request
+        presentPendingRequest()
+    }
+    private func presentPendingRequest() {
+        guard window != nil, pendingPresentation > handledPresentation,
+              let button = picker.subviews.compactMap({ $0 as? UIButton }).first else { return }
+        let request = pendingPresentation
+        handledPresentation = request
+        DispatchQueue.main.async { [weak self, weak button] in
+            guard let self, self.window != nil, self.pendingPresentation == request else { return }
+            button?.sendActions(for: .touchUpInside)
+        }
+    }
 }

@@ -45,8 +45,8 @@
     try {
       if (command === 'start') {
         await checkHealth();
-        if (__screenBackend === 'aliyun') await startAliyunUnifiedVisualAssistant();
-        else await startUnifiedVisualAssistant();
+        if (__screenBackend === 'aliyun') await startAliyunCheapUnifiedVisualAssistant();
+        else await startBrowserDirectUnifiedAssistant();
       } else if (command === 'stopTask') handleRealtimeStopButton();
       else if (command === 'stop') stopRealtime();
     } catch (error) { host('status', { error: String(error?.message || error) }); }

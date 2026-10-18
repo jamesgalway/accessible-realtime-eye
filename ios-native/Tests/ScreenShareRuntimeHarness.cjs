@@ -99,6 +99,19 @@ function runtime(backend, adapter = true) {
       await candidate.run('__screenCommand("start")');
       await flush(); await flush();
       check(candidate.run('__screenSnapshot().connected') === true, backend + ' original entry starts through native adapter');
+      if (backend === 'greencloud') {
+        check(candidate.commands.some(x => x.op === 'fetch' && x.url === '/api/gemini-browser-config?directScreen=1'), 'Google uses the original authorized direct-screen configuration');
+        check(candidate.run('appState.geminiReminder.activeScreenTransport') === 'browser_direct_generate_content', 'Google screening uses the original direct route');
+        check(candidate.run('appState.geminiReminder.transport') === 'browser-direct', 'Google live uses direct SDK connection');
+      } else {
+        check(candidate.run('isAliRealtimeVideoExperiment()') === true, 'Ali uses original continuous realtime video entry');
+        const beforeFrames = candidate.commands.filter(x => x.op === 'socketSend' && JSON.parse(x.data).type === 'input_image_buffer.append').length;
+        candidate.run('sendVideoFrame()');
+        const afterFrames = candidate.commands.filter(x => x.op === 'socketSend' && JSON.parse(x.data).type === 'input_image_buffer.append').length;
+        check(afterFrames === beforeFrames + 1, 'Ali sends the native screen using the existing realtime image protocol');
+        const socketMessages = candidate.commands.filter(x => x.op === 'socketSend').map(x => JSON.parse(x.data));
+        check(socketMessages.findIndex(x => x.type === 'input_audio_buffer.append') < socketMessages.findIndex(x => x.type === 'input_image_buffer.append'), 'existing Ali PCM-before-image requirement retained');
+      }
       check(candidate.run('!!(appState.realtime?.audioProcessor || appState.geminiReminder?.audioProcessor)'), 'native microphone attaches to original input handler');
       const audioBefore = candidate.commands.filter(x => x.op === 'socketSend').length;
       candidate.event({ kind: 'pcm', data: Buffer.alloc(6400).toString('base64') });

@@ -97,4 +97,10 @@ assert.match(view, /if screenSharingMode \{\s*ScreenShareView\(backend: selected
 assert.match(view, /private func stopCurrentPageMedia\(\) \{\s*screenSharing\.stop\(\)/);
 const backgroundHandler = view.slice(view.indexOf('.onChange(of: scenePhase)'), view.indexOf('private func backendButton'));
 assert.doesNotMatch(backgroundHandler, /screenSharing\.stop/);
-console.log('App launch lifecycle harness: 34/34 PASS');
+const screenView = fs.readFileSync('ios-native/AccessibleVision/ScreenShare/ScreenShareView.swift', 'utf8');
+assert.match(screenView, /\.task \{ controller\.prepare\(backend: backend\) \}/);
+assert.doesNotMatch(screenView, /Button\([^\n]*"准备屏幕共享"/);
+assert.match(screenView, /self\.prepared = true[\s\S]*?self\.broadcastPresentation \+= 1/);
+assert.match(screenView, /window != nil, pendingPresentation > handledPresentation/);
+assert.match(screenView, /handledPresentation = request[\s\S]*?button\?\.sendActions\(for: \.touchUpInside\)/);
+console.log('App launch lifecycle harness: 39/39 PASS');
