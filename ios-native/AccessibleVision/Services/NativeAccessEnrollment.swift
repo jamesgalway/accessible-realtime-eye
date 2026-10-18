@@ -3,7 +3,8 @@ import WebKit
 
 @MainActor
 enum NativeAccessEnrollment {
-    static func authorize(for pageURL: URL, cookieStore: WKHTTPCookieStore) async throws {
+    @discardableResult
+    static func authorize(for pageURL: URL, cookieStore: WKHTTPCookieStore) async throws -> HTTPCookie {
         let trusted = AssistantBackend.allCases.map { $0.baseURL }
         guard pageURL.scheme == "https", trusted.contains(where: {
             $0.host == pageURL.host && $0.port == pageURL.port && $0.scheme == pageURL.scheme
@@ -39,5 +40,6 @@ enum NativeAccessEnrollment {
         else { throw URLError(.userAuthenticationRequired) }
         await cookieStore.setCookie(cookie)
         try Task.checkCancellation()
+        return cookie
     }
 }

@@ -13,7 +13,7 @@ enum ScreenShareWebSocketRequest {
         else { return request }
         let cookies = enrolledCookies.filter {
             $0.name == "huiyan_native_access" && $0.isSecure && $0.isHTTPOnly
-                && $0.domain.lowercased() == baseURL.host?.lowercased()
+                && $0.domain.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ".")) == baseURL.host?.lowercased()
                 && $0.path == "/" && ($0.expiresDate == nil || $0.expiresDate! > Date())
         }
         for (name, value) in HTTPCookie.requestHeaderFields(with: cookies) {

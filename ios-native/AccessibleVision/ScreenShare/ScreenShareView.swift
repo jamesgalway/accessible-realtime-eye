@@ -14,6 +14,7 @@ final class ScreenShareController: ObservableObject {
     private var task: Task<Void, Never>?
     private var poll: Timer?
     private var identity = UUID()
+    private var connectionError: String?
 
     func prepare(backend: AssistantBackend) {
         guard !prepared, !preparing else { return }
@@ -24,6 +25,7 @@ final class ScreenShareController: ObservableObject {
         runtime.onError = { [weak self] text in
             guard let self, self.identity == identity else { return }
             self.status = text
+            self.connectionError = text
         }
         runtime.audio.onInterruption = { [weak self] in
             guard let self, self.identity == identity else { return }
@@ -51,7 +53,9 @@ final class ScreenShareController: ObservableObject {
                 let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
                     guard let self, self.identity == identity, self.started else { return }
                     let snapshot = runtime.snapshot()
-                    if let value = snapshot["status"] as? String, !value.isEmpty { self.status = value }
+                    if let error = self.connectionError { self.status = error }
+                    else if snapshot["connected"] as? Bool != true { self.status = "屏幕广播已开始，正在连接模型声音。" }
+                    else if let value = snapshot["status"] as? String, !value.isEmpty { self.status = value }
                     self.transcript = snapshot["transcript"] as? String ?? ""
                     self.stopLabel = snapshot["stopLabel"] as? String ?? "停止当前任务"
                 }
@@ -68,6 +72,7 @@ final class ScreenShareController: ObservableObject {
         poll?.invalidate(); poll = nil
         let old = runtime; runtime = nil; old?.stop()
         preparing = false; prepared = false; started = false
+        connectionError = nil
         status = message; transcript = ""
     }
 }

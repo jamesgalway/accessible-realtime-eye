@@ -20,9 +20,9 @@ final class ScreenShareRuntime: NSObject, URLSessionWebSocketDelegate {
     @MainActor
     func load(backend: AssistantBackend) async throws {
         let ticket = generation
-        let store = WKWebsiteDataStore.nonPersistent().httpCookieStore
-        try await NativeAccessEnrollment.authorize(for: backend.baseURL, cookieStore: store)
-        let cookies = await store.allCookies()
+        let dataStore = WKWebsiteDataStore.nonPersistent()
+        let cookie = try await NativeAccessEnrollment.authorize(for: backend.baseURL, cookieStore: dataStore.httpCookieStore)
+        let cookies = [cookie]
         try Task.checkCancellation()
         guard ticket == generation else { throw CancellationError() }
         baseURL = backend.baseURL
@@ -174,6 +174,11 @@ final class ScreenShareRuntime: NSObject, URLSessionWebSocketDelegate {
         }
         guard let baseURL else { return }
         let request = ScreenShareWebSocketRequest.make(url: url, baseURL: baseURL, enrolledCookies: enrolledCookies)
+        reportSocket(id: id, stage: "prepared", details: [
+            "ownOrigin": url.host == baseURL.host,
+            "enrollmentCount": enrolledCookies.count,
+            "authorizationAttached": request.value(forHTTPHeaderField: "Cookie") != nil
+        ])
         let task = network.webSocketTask(with: request)
         task.maximumMessageSize = 8_000_000
         sockets[id] = task; task.resume(); receive(task, id: id, ticket: generation)
@@ -191,14 +196,18 @@ final class ScreenShareRuntime: NSObject, URLSessionWebSocketDelegate {
                     self.event(["kind": "socket", "id": id, "type": "message", "data": text])
                     self.receive(task, id: id, ticket: ticket)
                 case .failure:
+                    let status = (task.response as? HTTPURLResponse)?.statusCode ?? 0
+                    self.reportSocket(id: id, stage: "failed", details: ["httpStatus": status])
                     self.sockets.removeValue(forKey: id)
                     self.event(["kind": "socket", "id": id, "type": "close", "code": 1006, "reason": "网络连接中断"])
+                    self.onError?(status > 0 ? "模型声音连接失败（HTTP \(status)）。" : "模型声音连接中断，请结束屏幕共享后重试。")
                 }
             }
         }
     }
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
         guard let id = sockets.first(where: { $0.value === webSocketTask })?.key else { return }
+        reportSocket(id: id, stage: "open")
         event(["kind": "socket", "id": id, "type": "open"])
     }
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
@@ -218,8 +227,8 @@ final class ScreenShareRuntime: NSObject, URLSessionWebSocketDelegate {
         receiver.stop(); audio.stop()
     }
     deinit { stop() }
-}
 
-private extension WKHTTPCookieStore {
-    func allCookies() async -> [HTTPCookie] { await withCheckedContinuation { continuation in getAllCookies { continuation.resume(returning: $0) } } }
+    private func reportSocket(id: Int, stage: String, details: [String: Any] = [:]) {
+        event(["kind": "network", "details": details.merging(["stage": stage, "socketID": id]) { _, new in new }])
+    }
 }

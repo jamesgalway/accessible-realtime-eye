@@ -43,6 +43,16 @@ jobs:
           HUIYAN_NATIVE_ACCESS_BOOTSTRAP: ${{ secrets.HUIYAN_NATIVE_ACCESS_BOOTSTRAP }}
         run: node .github/scripts/write-native-access.cjs
 
+      - name: Probe native Ali enrollment and WebSocket without generated response
+        run: |
+          app="$RUNNER_TEMP/ScreenNetworkProbe.app"
+          mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+          cp ios-native/Tests/ScreenShareNetworkProbe/Info.plist "$app/Contents/Info.plist"
+          cp ios-native/AccessibleVision/NativeAccessCredentials.json "$app/Contents/Resources/"
+          swiftc -swift-version 5 ios-native/AccessibleVision/Services/NativeAccessEnrollment.swift ios-native/AccessibleVision/ScreenShare/ScreenShareWebSocketRequest.swift ios-native/Tests/ScreenShareNetworkProbe/main.swift -o "$app/Contents/MacOS/ScreenNetworkProbe"
+          "$app/Contents/MacOS/ScreenNetworkProbe"
+          rm -rf "$app"
+
       - name: Generate Xcode project
         working-directory: ios-native
         run: xcodegen generate

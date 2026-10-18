@@ -178,5 +178,6 @@
     else if (event.kind === 'audioEnded') { const source = sources.get(event.id); sources.delete(event.id); source?.onended?.(); }
     else if (event.kind === 'speech') { const speech = speeches.get(event.id); if (!speech) return; root.speechSynthesis.speaking = event.type === 'start'; if (event.type === 'end') speeches.delete(event.id); speech['on' + event.type]?.(); }
     else if (event.kind === 'pcm') root.__screenInput?.(event.data);
+    else if (event.kind === 'network') root.__screenNetworkEvent?.(event.details);
   };
 })(globalThis);

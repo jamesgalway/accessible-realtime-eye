@@ -3,6 +3,9 @@
   'use strict';
   const host = __screenHostCall;
   const screenSessionID = crypto.randomUUID();
+  globalThis.__screenNetworkEvent = details => logClientEvent('screen_share.connection', {
+    screenSessionID, backend: __screenBackend, ...details
+  });
   setInterval(() => {
     if (appState.realtime || appState.geminiReminder) {
       logClientEvent('screen_share.native_media', { screenSessionID, backend: __screenBackend, ...host('diagnostics') });

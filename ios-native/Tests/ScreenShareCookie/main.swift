@@ -9,6 +9,11 @@ let socket = URL(string: "wss://screen.example.test/api/ws?modelProfile=flash")!
 let request = ScreenShareWebSocketRequest.make(url: socket, baseURL: base, enrolledCookies: cookies)
 precondition(request.value(forHTTPHeaderField: "Cookie") == "huiyan_native_access=fixture-only")
 precondition(!request.httpShouldHandleCookies)
+var normalizedProperties = cookies[0].properties!
+normalizedProperties[.domain] = ".screen.example.test"
+let normalized = HTTPCookie(properties: normalizedProperties)!
+precondition(ScreenShareWebSocketRequest.make(url: socket, baseURL: base, enrolledCookies: [normalized])
+    .value(forHTTPHeaderField: "Cookie") == "huiyan_native_access=fixture-only")
 for target in ["wss://generativelanguage.googleapis.com/ws/test", "wss://other.example.test/api/ws",
                "ws://screen.example.test/api/ws", "wss://screen.example.test:8443/api/ws"] {
     let other = ScreenShareWebSocketRequest.make(url: URL(string: target)!, baseURL: base, enrolledCookies: cookies)
