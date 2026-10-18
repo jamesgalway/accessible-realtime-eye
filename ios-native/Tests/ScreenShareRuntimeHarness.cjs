@@ -46,6 +46,7 @@ function runtime(backend, adapter = true, googleRoute = 'direct') {
         event({ kind: 'fetch', id: m.id, status: 200, body: JSON.stringify(body), headers: { 'content-type': 'application/json' } });
       }); break;
       case 'socket': setImmediate(() => {
+        check(new URL(m.url).protocol === 'wss:', 'native socket receives a valid secure WebSocket URL');
         event({ kind: 'socket', id: m.id, type: 'open' });
         if (m.url.includes('/api/ws')) event({ kind: 'socket', id: m.id, type: 'message', data: '{"type":"proxy.ready","model":"test"}' });
         if (m.url.includes('/api/gemini-live/ws')) event({ kind: 'socket', id: m.id, type: 'message', data: '{"type":"gemini.ready","model":"gemini-3.8-live","voice":"Zephyr"}' });

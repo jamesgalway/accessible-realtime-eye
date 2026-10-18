@@ -78,3 +78,11 @@ build64安装后用户报告共享绿云一度有声，随后又无声，不能�
 用户要求直接搬用慧眼直连连法，随后要求停止额外验证、由自己测试。核对普通慧眼实际CDN入口当前解析到@google/genai 1.52.0，屏幕内置仍为1.46.0。本次只把屏幕打包依赖对齐1.52.0，继续直接执行原startBrowserDirectUnifiedAssistant、原/api/gemini-browser-config?directScreen=1、原Live与筛图调用；不另造连接、合同或任务规则。此前离线比对原慧眼与屏幕入口的实际WSS地址和SDK setup消息完全一致；没有据此宣称手机问题已经解决。
 
 该修订只更换build64 unsigned IPA中screen-google-sdk.js资源，其他包内条目逐字节沿用已编译包；Sideloadly重新签名安装。命名build64-sdk152-r1，不冒充新的云端构建序号，也不编造新Xcode或真机验收结果。用户要求后停止额外测试，安装与必要打包继续完成；具体根因与效果待手机使用结果。
+
+## build64-direct-url-r2：屏幕地址协议适配错误
+
+用户实测SDK1.52修订仍然无声，继续要求查看API交接。静态对照确认SDK的getWebsocketBaseUrl给URL.protocol赋值'wss'，浏览器原生URL会自动规范为'wss:'；屏幕URL兼容层此前是普通字段，拼接成'wss//...'。ScreenShareRuntime.trustedURL要求wss，因而在发起请求前拒绝；与此前只有browser_direct.connecting、没有socket prepared的记录吻合。Key已取到且四把鉴权通过，不能把此处解释为Key失效、模型或苹果签名。
+
+本次只修屏幕URL兼容属性，补回协议冒号的浏览器行为；屏幕WebSocket启动延后到下一次计时回调，使调用者先安装事件处理器，避免原生地址拒绝同步返回时错误事件被丢弃。继续执行原慧眼SDK、配置和连接代码，不更改Google地址白名单、Key、任务规则或原生音频。原离线宿主未校验绝对WSS地址，导致之前离线连接检查漏掉此错，现给既有宿主补地址格式断言，不把旧结果冒充此处已验证。
+
+按用户要求本次不运行额外模型、模拟器或回归测试，只更新已编译安装包内ScreenRuntimeEnvironment.js并重新签名安装，SDK沿r1的1.52.0。效果由用户自行测试，不能提前标为真机修复成功；绿云转接间歇无声另有记录，未据此宣称一并解决。

@@ -75,6 +75,11 @@
       if (!parsed) throw new TypeError('Invalid URL');
       Object.assign(this, parsed); this.searchParams = new root.URLSearchParams(parsed.search);
     }
+    get protocol() { return this._protocol; }
+    set protocol(value) {
+      const scheme = String(value).match(/^([a-z][a-z0-9+.-]*):?$/i);
+      if (scheme) this._protocol = scheme[1].toLowerCase() + ':';
+    }
     get origin() { return this.protocol + '//' + this.host; }
     get href() { return this.toString(); }
     get search() { const value = this.searchParams?.toString(); return value ? '?' + value : ''; }
@@ -106,7 +111,11 @@
   });
   root.WebSocket = class extends Events {
     static CONNECTING = 0; static OPEN = 1; static CLOSING = 2; static CLOSED = 3;
-    constructor(url) { super(); this.id = uid(); this.readyState = 0; this.url = String(url); sockets.set(this.id, this); host('socket', { id: this.id, url: this.url }); }
+    constructor(url) {
+      super(); this.id = uid(); this.readyState = 0; this.url = String(url); sockets.set(this.id, this);
+      // Browser socket events occur after callers attach their handlers.
+      root.setTimeout(() => { if (this.readyState === 0) host('socket', { id: this.id, url: this.url }); }, 0);
+    }
     send(data) { if (this.readyState !== 1) throw new Error('Socket is not open'); host('socketSend', { id: this.id, data: String(data) }); }
     close() { if (this.readyState >= 2) return; this.readyState = 2; host('socketClose', { id: this.id }); }
   };
