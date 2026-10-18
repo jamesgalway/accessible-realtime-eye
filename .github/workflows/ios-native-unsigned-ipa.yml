@@ -5,6 +5,11 @@ permissions:
 
 on:
   workflow_dispatch:
+    inputs:
+      verify_native_connection:
+        description: "Explicitly run the bounded native Ali network probe"
+        type: boolean
+        default: false
   push:
     branches:
       - ios-native-screen-share-20261018
@@ -30,6 +35,11 @@ jobs:
           npm ci --ignore-scripts --no-audit --no-fund
           node build.cjs
 
+      - name: Verify native entry bridge and lifecycle
+        run: |
+          node ios-native/Tests/NativeAssistantEntryHarness.cjs
+          node ios-native/Tests/AppLaunchLifecycleHarness.js
+
       - name: Verify native JavaScriptCore compatibility
         run: swift ios-native/Tests/ScreenShareJSCoreSmoke.swift ios-native
 
@@ -44,6 +54,7 @@ jobs:
         run: node .github/scripts/write-native-access.cjs
 
       - name: Probe native Ali enrollment and WebSocket without generated response
+        if: github.event_name == 'workflow_dispatch' && inputs.verify_native_connection
         run: |
           app="$RUNNER_TEMP/ScreenNetworkProbe.app"
           mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
@@ -81,6 +92,9 @@ jobs:
                 done
             exit "$status"
           fi
+
+      - name: Verify native entries in iPhone simulator accessibility tree
+        run: python3 ios-native/Tests/run-native-entry-accessibility.py
 
       - name: Package unsigned IPA
         working-directory: ios-native

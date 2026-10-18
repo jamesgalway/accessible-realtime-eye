@@ -85,7 +85,6 @@ struct ScreenShareView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 Text("屏幕共享").font(.title2).accessibilityAddTraits(.isHeader)
-                Text("当前使用\(backend.title)。可以询问屏幕内容、设置主动提醒，或使用持续播报；普通问答保留联网搜索。")
                 Text(controller.status)
                 if !controller.prepared {
                     Button(controller.preparing ? "正在准备" : "开始屏幕共享") { controller.prepare(backend: backend) }
@@ -98,7 +97,6 @@ struct ScreenShareView: View {
                     }
                     Button("结束屏幕共享") { controller.stop() }
                 }
-                Text("开始广播后可以切到其他应用，像使用慧眼一样直接说出问题或任务。系统不允许录制的画面可能无法获取。")
                 if !controller.transcript.isEmpty {
                     Button(showConversation ? "折叠互动内容" : "展开互动内容") { showConversation.toggle() }
                     if showConversation { Text(controller.transcript).textSelection(.enabled) }

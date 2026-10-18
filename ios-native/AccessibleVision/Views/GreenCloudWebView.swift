@@ -7,13 +7,15 @@ struct GreenCloudWebView: UIViewRepresentable {
     let camera: NativeCameraService
     let onMediaCaptureRequested: () -> Void
     let onMediaCaptureReleased: () -> Void
+    var entryController: NativeAssistantEntryController? = nil
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
             origin: url,
             camera: camera,
             onMediaCaptureRequested: onMediaCaptureRequested,
-            onMediaCaptureReleased: onMediaCaptureReleased
+            onMediaCaptureReleased: onMediaCaptureReleased,
+            entryController: entryController
         )
     }
 
@@ -50,6 +52,13 @@ struct GreenCloudWebView: UIViewRepresentable {
             forMainFrameOnly: true
         ))
         configuration.userContentController.add(context.coordinator, name: "teachingViewpoint")
+        if entryController != nil {
+            configuration.userContentController.addUserScript(WKUserScript(
+                source: NativeAssistantEntryController.script,
+                injectionTime: .atDocumentEnd, forMainFrameOnly: true
+            ))
+            configuration.userContentController.add(context.coordinator, name: "nativeAssistantEntries")
+        }
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         context.coordinator.attach(to: webView)
@@ -57,6 +66,8 @@ struct GreenCloudWebView: UIViewRepresentable {
         webView.navigationDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = false
         webView.scrollView.contentInsetAdjustmentBehavior = .never
+        webView.isAccessibilityElement = false
+        webView.accessibilityElementsHidden = false
         context.coordinator.loadAuthorized(in: webView, url: url)
         return webView
     }
@@ -72,6 +83,7 @@ struct GreenCloudWebView: UIViewRepresentable {
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "nativeLocation")
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "nativeFind")
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "teachingViewpoint")
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "nativeAssistantEntries")
     }
 
     final class Coordinator: NSObject, WKUIDelegate, WKNavigationDelegate, WKScriptMessageHandler {
@@ -87,12 +99,14 @@ struct GreenCloudWebView: UIViewRepresentable {
         private var webReady = false
         private var latestPacket: NativeVisionFramePacket?
         private var accessTask: Task<Void, Never>?
+        private let entryController: NativeAssistantEntryController?
 
         init(
             origin: URL,
             camera: NativeCameraService,
             onMediaCaptureRequested: @escaping () -> Void,
-            onMediaCaptureReleased: @escaping () -> Void
+            onMediaCaptureReleased: @escaping () -> Void,
+            entryController: NativeAssistantEntryController?
         ) {
             self.origin = origin
             self.location = NativeLocationBridge(origin: origin)
@@ -101,10 +115,12 @@ struct GreenCloudWebView: UIViewRepresentable {
             self.camera = camera
             self.onMediaCaptureRequested = onMediaCaptureRequested
             self.onMediaCaptureReleased = onMediaCaptureReleased
+            self.entryController = entryController
         }
 
         func attach(to webView: WKWebView) {
             self.webView = webView
+            entryController?.attach(webView)
             audioDiagnostics.onSnapshot = { [weak self] packet in
                 guard let self, self.webReady, let currentWebView = self.webView,
                       let url = currentWebView.url, self.isTeachingURL(url),
@@ -138,6 +154,7 @@ struct GreenCloudWebView: UIViewRepresentable {
         }
 
         func detach() {
+            if let webView { entryController?.detach(webView) }
             accessTask?.cancel()
             accessTask = nil
             audioDiagnostics.stop()
@@ -196,12 +213,21 @@ struct GreenCloudWebView: UIViewRepresentable {
             if let latestPacket {
                 deliver(latestPacket, to: webView)
             }
+            if entryController != nil, UIAccessibility.isVoiceOverRunning {
+                // Refresh the newly loaded web subtree without choosing a focus
+                // target. Do this only for page load, never for model replies.
+                UIAccessibility.post(notification: .layoutChanged, argument: nil)
+            }
         }
 
         func userContentController(
             _ userContentController: WKUserContentController,
             didReceive message: WKScriptMessage
         ) {
+            if message.name == "nativeAssistantEntries", let webView {
+                entryController?.receive(message, in: webView)
+                return
+            }
             if message.name == "nativeLocation", let webView {
                 location.receive(message, in: webView)
                 return

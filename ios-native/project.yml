@@ -80,3 +80,25 @@ targets:
       - path: AccessibleVisionTests
     dependencies:
       - target: AccessibleVision
+  AccessibleVisionEntryUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: EntryUITests
+    settings:
+      base:
+        PRODUCT_NAME: AccessibleVisionEntryUITests
+        PRODUCT_BUNDLE_IDENTIFIER: com.zzypiano.accessiblevision.entryuitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: AccessibleVision
+    dependencies:
+      - target: AccessibleVision
+schemes:
+  NativeEntryAccessibility:
+    build:
+      targets:
+        AccessibleVision: all
+        AccessibleVisionEntryUITests: [test]
+    test:
+      targets:
+        - AccessibleVisionEntryUITests

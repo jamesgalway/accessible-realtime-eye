@@ -9,6 +9,7 @@ struct WebAssistantView: View {
     @State private var teachingMode = false
     @State private var screenSharingMode = false
     @StateObject private var screenSharing = ScreenShareController()
+    @StateObject private var assistantEntries = NativeAssistantEntryController()
     @State private var mediaCaptureRequested = false
 
     private var selectedURL: URL {
@@ -33,29 +34,64 @@ struct WebAssistantView: View {
             }
 
             HStack(spacing: 12) {
-                backendButton(.greenCloud)
                 backendButton(.aliyun)
-                teachingButton
+                backendButton(.greenCloud)
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
             .background(.bar)
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel("选择功能入口")
 
-            Button("屏幕共享") {
-                guard !screenSharingMode else { return }
-                stopCurrentPageMedia()
-                teachingMode = false
-                screenSharingMode = true
+            HStack(spacing: 12) {
+                teachingButton
+                Button("屏幕共享") {
+                    guard !screenSharingMode else { return }
+                    stopCurrentPageMedia()
+                    teachingMode = false
+                    screenSharingMode = true
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(screenSharingMode ? .accentColor : .secondary)
+                .accessibilityIdentifier("nativeScreenShareButton")
+                .accessibilityValue(screenSharingMode ? "当前入口，绑定\(selectedBackend.title)" : "将绑定\(selectedBackend.title)")
+                .accessibilityHint("进入独立屏幕共享；旧任务会结束")
             }
-            .buttonStyle(.borderedProminent)
-            .tint(screenSharingMode ? .accentColor : .secondary)
-            .accessibilityValue(screenSharingMode ? "当前入口，绑定\(selectedBackend.title)" : "将绑定\(selectedBackend.title)")
-            .accessibilityHint("进入独立屏幕共享；旧任务会结束")
+            .padding(.horizontal, 16)
             .padding(.bottom, 8)
 
+                HStack(spacing: 12) {
+                    Button("实时慧眼") { openAssistant(.unified) }
+                        .disabled(!teachingMode && !screenSharingMode && !assistantEntries.unifiedAvailable)
+                        .accessibilityIdentifier("nativeUnifiedAssistantButton")
+                    if selectedBackend == .greenCloud {
+                    Button("直连筛图") { openAssistant(.directScreen) }
+                        .disabled(!teachingMode && !screenSharingMode && !assistantEntries.directScreenAvailable)
+                        .accessibilityHint("启动原来的手机直连筛图方案")
+                        .accessibilityIdentifier("nativeDirectScreenAssistantButton")
+                    } else {
+                        Button("实时视频实验") { openAssistant(.aliVideo) }
+                            .disabled(!teachingMode && !screenSharingMode && !assistantEntries.aliVideoAvailable)
+                            .accessibilityLabel("阿里实时视频实验")
+                            .accessibilityIdentifier("nativeAliVideoAssistantButton")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+                if !assistantEntries.status.isEmpty { Text(assistantEntries.status) }
+
+            if screenSharingMode {
+                Button("返回慧眼") {
+                    stopCurrentPageMedia()
+                    teachingMode = false
+                    screenSharingMode = false
+                }
+                .buttonStyle(.bordered)
+                .accessibilityHint("结束屏幕共享，返回慧眼页面")
+                .padding(.bottom, 8)
+            }
+
             Divider()
+                .accessibilityHidden(true)
 
             if screenSharingMode {
                 ScreenShareView(backend: selectedBackend, controller: screenSharing)
@@ -74,10 +110,12 @@ struct WebAssistantView: View {
                     setIdleTimerDisabled(false)
                     torch.turnOff()
                     camera.stop()
-                }
+                },
+                entryController: !teachingMode ? assistantEntries : nil
             )
             .id("\(selectedBackend.rawValue):\(teachingMode ? "teaching" : "assistant")")
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityIdentifier("nativeWebContent")
             }
         }
         .alert(
@@ -111,7 +149,8 @@ struct WebAssistantView: View {
 
     private func backendButton(_ backend: AssistantBackend) -> some View {
         let isSelected = selectedBackend == backend && !teachingMode && !screenSharingMode
-        return Button(backend.title) {
+        let title = backend == .greenCloud ? "Gemini版" : "阿里百炼"
+        return Button(title) {
             guard selectedBackend != backend || teachingMode || screenSharingMode else { return }
             stopCurrentPageMedia()
             selectedBackend = backend
@@ -120,7 +159,7 @@ struct WebAssistantView: View {
         }
         .buttonStyle(.borderedProminent)
         .tint(isSelected ? .accentColor : .secondary)
-        .accessibilityLabel(backend.title)
+        .accessibilityLabel(title)
         .accessibilityValue(isSelected ? "当前入口" : "未选择")
         .accessibilityHint(isSelected ? "当前正在使用" : "双击切换到这个入口；旧任务会结束")
     }
@@ -149,6 +188,7 @@ struct WebAssistantView: View {
 
     private func stopCurrentPageMedia() {
         screenSharing.stop()
+        assistantEntries.cancelPending()
         mediaCaptureRequested = false
         setIdleTimerDisabled(false)
         torch.turnOff()
@@ -157,5 +197,18 @@ struct WebAssistantView: View {
 
     private func setIdleTimerDisabled(_ disabled: Bool) {
         UIApplication.shared.isIdleTimerDisabled = disabled
+    }
+
+    private func openAssistant(_ entry: NativeAssistantEntryController.Entry) {
+        guard entry != .directScreen || selectedBackend == .greenCloud else { return }
+        guard entry != .aliVideo || selectedBackend == .aliyun else { return }
+        if teachingMode || screenSharingMode {
+            stopCurrentPageMedia()
+            teachingMode = false
+            screenSharingMode = false
+            assistantEntries.startWhenReady(entry, backend: selectedBackend)
+        } else {
+            assistantEntries.start(entry, backend: selectedBackend)
+        }
     }
 }
