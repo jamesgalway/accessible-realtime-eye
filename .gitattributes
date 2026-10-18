@@ -1,0 +1,7 @@
+ios-native/ScreenShareSources/* -text
+ios-native/ScreenShareShared/*.swift text eol=lf
+ios-native/ScreenBroadcastExtension/*.swift text eol=lf
+ios-native/AccessibleVision/ScreenShare/*.swift text eol=lf
+ios-native/AccessibleVision/ScreenShare/*.js text eol=lf
+ios-native/ScreenShareBuild/*.json text eol=lf
+ios-native/ScreenShareBuild/*.cjs text eol=lf

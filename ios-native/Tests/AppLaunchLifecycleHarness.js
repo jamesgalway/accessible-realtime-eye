@@ -68,7 +68,7 @@ assert.match(
 assert.match(view, /UIApplication\.shared\.isIdleTimerDisabled = disabled/);
 assert.match(
   view,
-  /guard selectedBackend != backend \|\| teachingMode else \{ return \}[\s\S]*?stopCurrentPageMedia\(\)[\s\S]*?selectedBackend = backend[\s\S]*?teachingMode = false/,
+  /guard selectedBackend != backend \|\| teachingMode \|\| screenSharingMode else \{ return \}[\s\S]*?stopCurrentPageMedia\(\)[\s\S]*?selectedBackend = backend[\s\S]*?teachingMode = false/,
   'Switching backends must stop the previous native media session.'
 );
 assert.match(
@@ -93,4 +93,8 @@ assert.match(webView, /nativeMediaReleased/);
 assert.match(bridge, /postNative\(\{ type: 'requestNativeMediaStart' \}\)/);
 assert.match(bridge, /postNative\(\{ type: 'nativeMediaReleased' \}\)/);
 
-console.log('App launch lifecycle harness: 31/31 PASS');
+assert.match(view, /if screenSharingMode \{\s*ScreenShareView\(backend: selectedBackend, controller: screenSharing\)\s*\} else \{\s*GreenCloudWebView\(/);
+assert.match(view, /private func stopCurrentPageMedia\(\) \{\s*screenSharing\.stop\(\)/);
+const backgroundHandler = view.slice(view.indexOf('.onChange(of: scenePhase)'), view.indexOf('private func backendButton'));
+assert.doesNotMatch(backgroundHandler, /screenSharing\.stop/);
+console.log('App launch lifecycle harness: 34/34 PASS');

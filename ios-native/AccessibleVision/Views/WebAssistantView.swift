@@ -7,6 +7,8 @@ struct WebAssistantView: View {
     @StateObject private var torch = NativeTorchController()
     @State private var selectedBackend: AssistantBackend = .greenCloud
     @State private var teachingMode = false
+    @State private var screenSharingMode = false
+    @StateObject private var screenSharing = ScreenShareController()
     @State private var mediaCaptureRequested = false
 
     private var selectedURL: URL {
@@ -15,6 +17,7 @@ struct WebAssistantView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if !screenSharingMode {
             HStack {
                 AccessibleTorchButton(isEnabled: torch.isEnabled) {
                     torch.toggle()
@@ -27,6 +30,7 @@ struct WebAssistantView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
             .background(.bar)
+            }
 
             HStack(spacing: 12) {
                 backendButton(.greenCloud)
@@ -39,8 +43,23 @@ struct WebAssistantView: View {
             .accessibilityElement(children: .contain)
             .accessibilityLabel("选择功能入口")
 
+            Button("屏幕共享") {
+                guard !screenSharingMode else { return }
+                stopCurrentPageMedia()
+                teachingMode = false
+                screenSharingMode = true
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(screenSharingMode ? .accentColor : .secondary)
+            .accessibilityValue(screenSharingMode ? "当前入口，绑定\(selectedBackend.title)" : "将绑定\(selectedBackend.title)")
+            .accessibilityHint("进入独立屏幕共享；旧任务会结束")
+            .padding(.bottom, 8)
+
             Divider()
 
+            if screenSharingMode {
+                ScreenShareView(backend: selectedBackend, controller: screenSharing)
+            } else {
             GreenCloudWebView(
                 url: selectedURL,
                 backend: selectedBackend,
@@ -59,6 +78,7 @@ struct WebAssistantView: View {
             )
             .id("\(selectedBackend.rawValue):\(teachingMode ? "teaching" : "assistant")")
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
         .alert(
             "闪光灯不可用",
@@ -72,6 +92,7 @@ struct WebAssistantView: View {
             Text(torch.errorMessage)
         }
         .onDisappear {
+            screenSharing.stop()
             setIdleTimerDisabled(false)
             torch.turnOff()
             camera.stop()
@@ -89,12 +110,13 @@ struct WebAssistantView: View {
     }
 
     private func backendButton(_ backend: AssistantBackend) -> some View {
-        let isSelected = selectedBackend == backend && !teachingMode
+        let isSelected = selectedBackend == backend && !teachingMode && !screenSharingMode
         return Button(backend.title) {
-            guard selectedBackend != backend || teachingMode else { return }
+            guard selectedBackend != backend || teachingMode || screenSharingMode else { return }
             stopCurrentPageMedia()
             selectedBackend = backend
             teachingMode = false
+            screenSharingMode = false
         }
         .buttonStyle(.borderedProminent)
         .tint(isSelected ? .accentColor : .secondary)
@@ -108,6 +130,7 @@ struct WebAssistantView: View {
             guard !teachingMode else { return }
             stopCurrentPageMedia()
             teachingMode = true
+            screenSharingMode = false
         }
         .buttonStyle(.borderedProminent)
         .tint(teachingMode ? .accentColor : .secondary)
@@ -125,6 +148,7 @@ struct WebAssistantView: View {
     }
 
     private func stopCurrentPageMedia() {
+        screenSharing.stop()
         mediaCaptureRequested = false
         setIdleTimerDisabled(false)
         torch.turnOff()

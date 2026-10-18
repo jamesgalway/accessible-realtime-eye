@@ -1,4 +1,4 @@
-name: Build Private iPhone Permissions IPA
+name: Build Private iPhone Screen Sharing IPA
 
 permissions:
   contents: read
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - ios-native-web-permissions-20261008
+      - ios-native-screen-share-20261018
     paths:
       - "ios-native/**"
       - ".github/workflows/ios-native-unsigned-ipa.yml"
@@ -23,6 +23,15 @@ jobs:
 
       - name: Install XcodeGen
         run: brew install xcodegen
+
+      - name: Build isolated screen runtime
+        working-directory: ios-native/ScreenShareBuild
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          node build.cjs
+
+      - name: Verify native JavaScriptCore compatibility
+        run: swift ios-native/Tests/ScreenShareJSCoreSmoke.swift ios-native
 
       - name: Add private native authorization resource
         env:
