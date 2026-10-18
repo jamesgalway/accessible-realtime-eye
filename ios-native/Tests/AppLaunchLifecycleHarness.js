@@ -93,12 +93,12 @@ assert.match(webView, /nativeMediaReleased/);
 assert.match(bridge, /postNative\(\{ type: 'requestNativeMediaStart' \}\)/);
 assert.match(bridge, /postNative\(\{ type: 'nativeMediaReleased' \}\)/);
 
-assert.match(view, /if screenSharingMode \{\s*ScreenShareView\(backend: selectedBackend, controller: screenSharing\)\s*\.frame\(height: max\(320, viewport\.size\.height - 270\)\)\s*\} else \{\s*GreenCloudWebView\(/);
+assert.match(view, /if screenSharingMode \{\s*ScreenShareView\(backend: selectedBackend, googleRoute: googleScreenRoute, controller: screenSharing\)[\s\S]*?\.frame\(height: max\(320, viewport\.size\.height - 270\)\)\s*\} else \{\s*GreenCloudWebView\(/);
 assert.match(view, /private func stopCurrentPageMedia\(\) \{\s*screenSharing\.stop\(\)/);
 const backgroundHandler = view.slice(view.indexOf('.onChange(of: scenePhase)'), view.indexOf('private func backendButton'));
 assert.doesNotMatch(backgroundHandler, /screenSharing\.stop/);
 const screenView = fs.readFileSync('ios-native/AccessibleVision/ScreenShare/ScreenShareView.swift', 'utf8');
-assert.match(screenView, /\.task \{ controller\.prepare\(backend: backend\) \}/);
+assert.match(screenView, /\.task \{ controller\.prepare\(backend: backend, googleRoute: googleRoute\) \}/);
 assert.doesNotMatch(screenView, /Button\([^\n]*"准备屏幕共享"/);
 assert.match(screenView, /self\.prepared = true[\s\S]*?self\.broadcastPresentation \+= 1/);
 assert.match(screenView, /window != nil, pendingPresentation > handledPresentation/);
@@ -112,7 +112,7 @@ assert.doesNotMatch(view, /accessibilityElement\(children:/);
 assert.ok(view.indexOf('backendButton(.aliyun)') < view.indexOf('backendButton(.greenCloud)'));
 const orderedControls = ['backendButton(.aliyun)', 'backendButton(.greenCloud)', 'AccessibleTorchButton(',
   'sectionButton(.assistant', 'sectionButton(.navigation', 'sectionButton(.teaching',
-  'Button("实时慧眼")', 'Button("直连筛图")', 'Button("屏幕共享")', 'Button("结束慧眼")'];
+  'Button("实时慧眼")', 'Button("直连筛图")', 'Button("共享直连")', 'Button("共享绿云")', 'Button("屏幕共享")', 'Button("结束慧眼")'];
 const indices = orderedControls.map(label => view.indexOf(label));
 assert.ok(indices.every(index => index >= 0));
 assert.deepEqual([...indices].sort((a,b)=>a-b),indices);

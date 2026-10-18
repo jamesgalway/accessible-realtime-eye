@@ -49,6 +49,7 @@
       if (command === 'start') {
         await checkHealth();
         if (__screenBackend === 'aliyun') await startAliyunCheapUnifiedVisualAssistant();
+        else if (globalThis.__screenGoogleRoute === 'relay') await startUnifiedVisualAssistant();
         else await startBrowserDirectUnifiedAssistant();
       } else if (command === 'stopTask') handleRealtimeStopButton();
       else if (command === 'stop') stopRealtime();

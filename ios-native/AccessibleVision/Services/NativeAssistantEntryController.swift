@@ -4,9 +4,10 @@ import WebKit
 /// Native controls mirror and activate the existing provider page buttons.
 /// They do not select models, create sessions, or implement task behavior.
 final class NativeAssistantEntryController: ObservableObject {
-    enum Entry: String { case unified, directScreen, aliVideo, stop }
+    enum Entry: String { case unified, directScreen, googleVoice, aliVideo, stop }
     @Published private(set) var unifiedAvailable = false
     @Published private(set) var directScreenAvailable = false
+    @Published private(set) var googleVoiceAvailable = false
     @Published private(set) var aliVideoAvailable = false
     @Published private(set) var stopAvailable = false
     @Published private(set) var status = ""
@@ -40,6 +41,7 @@ final class NativeAssistantEntryController: ObservableObject {
             guard let self, self.identity == ticket else { return }
             self.unifiedAvailable = false
             self.directScreenAvailable = false
+            self.googleVoiceAvailable = false
             self.aliVideoAvailable = false
             self.stopAvailable = false
             self.status = ""
@@ -53,6 +55,7 @@ final class NativeAssistantEntryController: ObservableObject {
               let body = message.body as? [String: Bool] else { return }
         unifiedAvailable = body["unified"] == true
         directScreenAvailable = body["directScreen"] == true
+        googleVoiceAvailable = body["googleVoice"] == true
         aliVideoAvailable = body["aliVideo"] == true
         stopAvailable = body["stop"] == true
         if let pending = pendingEntry, view.url?.host == pending.1,
@@ -66,6 +69,7 @@ final class NativeAssistantEntryController: ObservableObject {
         switch entry {
         case .unified: return unifiedAvailable
         case .directScreen: return directScreenAvailable
+        case .googleVoice: return googleVoiceAvailable
         case .aliVideo: return aliVideoAvailable
         case .stop: return stopAvailable
         }
@@ -101,6 +105,7 @@ final class NativeAssistantEntryController: ObservableObject {
       const ids = {
         unified: aliyun ? 'start-aliyun-unified-visual-assistant' : 'start-unified-visual-assistant',
         directScreen: aliyun ? null : 'start-browser-direct-unified-assistant',
+        googleVoice: aliyun ? 'start-unified-visual-assistant' : null,
         aliVideo: aliyun ? 'start-aliyun-cheap-unified-visual-assistant' : null,
         stop: 'stop-realtime'
       };
@@ -124,7 +129,7 @@ final class NativeAssistantEntryController: ObservableObject {
       // nodes, listeners, disabled/hidden state, and task implementations remain.
       const style = document.createElement('style');
       style.textContent = Object.values(ids).filter(Boolean).map(id => '#' + id).join(',') + '{display:none!important}'
-        + (aliyun ? '#start-unified-visual-assistant,#start-browser-direct-unified-assistant{display:none!important}' : '')
+        + (aliyun ? '#start-browser-direct-unified-assistant{display:none!important}' : '')
         + 'body>.hero{padding:0!important;background:none!important;border:0!important;box-shadow:none!important}'
         + 'body>.hero>h1,body>.hero>p,body>.footer,.camera-panel>h2,.camera-panel>.hint,#teaching-entry{display:none!important}'
         + 'html[data-native-section="assistant"] [data-native-navigation-panel]{display:none!important}'

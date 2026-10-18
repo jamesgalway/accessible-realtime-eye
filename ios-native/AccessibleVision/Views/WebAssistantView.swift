@@ -9,6 +9,7 @@ struct WebAssistantView: View {
     private enum Section: String { case assistant, navigation, teaching }
     @State private var selectedSection: Section = .assistant
     @State private var screenSharingMode = false
+    @State private var googleScreenRoute: ScreenShareGoogleRoute = .direct
     @StateObject private var screenSharing = ScreenShareController()
     @StateObject private var assistantEntries = NativeAssistantEntryController()
     @State private var mediaCaptureRequested = false
@@ -49,6 +50,11 @@ struct WebAssistantView: View {
 
             if selectedSection == .assistant {
                 HStack(spacing: 12) {
+                    if selectedBackend == .aliyun {
+                        Button("谷歌声音") { openAssistant(.googleVoice) }
+                            .disabled(!screenSharingMode && !assistantEntries.googleVoiceAvailable)
+                            .accessibilityIdentifier("nativeAliGoogleVoiceButton")
+                    }
                     Button("实时慧眼") { openAssistant(.unified) }
                         .disabled(!screenSharingMode && !assistantEntries.unifiedAvailable)
                         .accessibilityIdentifier("nativeUnifiedAssistantButton")
@@ -67,13 +73,18 @@ struct WebAssistantView: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 8)
                 HStack(spacing: 12) {
-                    Button("屏幕共享") {
-                        guard !screenSharingMode else { return }
-                        stopCurrentPageMedia()
-                        screenSharingMode = true
+                    if selectedBackend == .greenCloud {
+                        Button("共享直连") { openScreenShare(.direct) }
+                            .accessibilityIdentifier("nativeDirectScreenShareButton")
+                            .accessibilityValue(screenSharingMode && googleScreenRoute == .direct ? "已选择" : "未选择")
+                        Button("共享绿云") { openScreenShare(.relay) }
+                            .accessibilityIdentifier("nativeRelayScreenShareButton")
+                            .accessibilityValue(screenSharingMode && googleScreenRoute == .relay ? "已选择" : "未选择")
+                    } else {
+                        Button("屏幕共享") { openScreenShare(.direct) }
+                            .accessibilityIdentifier("nativeScreenShareButton")
+                            .accessibilityValue(screenSharingMode ? "已选择" : "未选择")
                     }
-                    .accessibilityIdentifier("nativeScreenShareButton")
-                    .accessibilityValue(screenSharingMode ? "已选择" : "未选择")
                     Button("结束慧眼") {
                         if screenSharingMode {
                             stopCurrentPageMedia()
@@ -95,7 +106,8 @@ struct WebAssistantView: View {
                 .accessibilityHidden(true)
 
             if screenSharingMode {
-                ScreenShareView(backend: selectedBackend, controller: screenSharing)
+                ScreenShareView(backend: selectedBackend, googleRoute: googleScreenRoute, controller: screenSharing)
+                    .id("\(selectedBackend.rawValue):\(googleScreenRoute.rawValue)")
                     .frame(height: max(320, viewport.size.height - 270))
             } else {
             GreenCloudWebView(
@@ -206,6 +218,7 @@ struct WebAssistantView: View {
 
     private func openAssistant(_ entry: NativeAssistantEntryController.Entry) {
         guard entry != .directScreen || selectedBackend == .greenCloud else { return }
+        guard entry != .googleVoice || selectedBackend == .aliyun else { return }
         guard entry != .aliVideo || selectedBackend == .aliyun else { return }
         if screenSharingMode {
             stopCurrentPageMedia()
@@ -214,5 +227,12 @@ struct WebAssistantView: View {
         } else {
             assistantEntries.start(entry, backend: selectedBackend)
         }
+    }
+
+    private func openScreenShare(_ route: ScreenShareGoogleRoute) {
+        guard !screenSharingMode || googleScreenRoute != route else { return }
+        stopCurrentPageMedia()
+        googleScreenRoute = route
+        screenSharingMode = true
     }
 }

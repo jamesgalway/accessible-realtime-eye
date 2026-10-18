@@ -4,6 +4,10 @@ import WebKit
 import Security
 import UIKit
 
+enum ScreenShareGoogleRoute: String {
+    case direct, relay
+}
+
 final class ScreenShareRuntime: NSObject, URLSessionWebSocketDelegate {
     private var context: JSContext?
     private var network: URLSession?
@@ -18,7 +22,7 @@ final class ScreenShareRuntime: NSObject, URLSessionWebSocketDelegate {
     var onError: ((String) -> Void)?
 
     @MainActor
-    func load(backend: AssistantBackend) async throws {
+    func load(backend: AssistantBackend, googleRoute: ScreenShareGoogleRoute) async throws {
         let ticket = generation
         let dataStore = WKWebsiteDataStore.nonPersistent()
         let cookie = try await NativeAccessEnrollment.authorize(for: backend.baseURL, cookieStore: dataStore.httpCookieStore)
@@ -44,6 +48,7 @@ final class ScreenShareRuntime: NSObject, URLSessionWebSocketDelegate {
         context.setObject(bridge, forKeyedSubscript: "_screenHost" as NSString)
         context.setObject(backend.baseURL.absoluteString, forKeyedSubscript: "__screenBaseURL" as NSString)
         context.setObject(backend == .aliyun ? "aliyun" : "greencloud", forKeyedSubscript: "__screenBackend" as NSString)
+        context.setObject(googleRoute.rawValue, forKeyedSubscript: "__screenGoogleRoute" as NSString)
         for name in ["ScreenRuntimeEnvironment", "screen-google-sdk", backend == .aliyun ? "aliyun-screen-runtime" : "greencloud-screen-runtime"] {
             guard let url = Bundle.main.url(forResource: name, withExtension: "js") else { throw URLError(.fileDoesNotExist) }
             context.evaluateScript(try String(contentsOf: url, encoding: .utf8), withSourceURL: URL(string: "huiyan-resource:///" + name + ".js"))

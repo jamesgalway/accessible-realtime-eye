@@ -13,7 +13,8 @@ final class NativeEntryAccessibilityTests: XCTestCase {
         let teaching = app.buttons["nativeSection-teaching"]
         XCTAssertTrue(unified.waitForExistence(timeout: 20))
         XCTAssertTrue(direct.exists)
-        XCTAssertTrue(app.buttons["屏幕共享"].exists)
+        XCTAssertTrue(app.buttons["nativeDirectScreenShareButton"].exists)
+        XCTAssertTrue(app.buttons["nativeRelayScreenShareButton"].exists)
         XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 30))
         let enabled = NSPredicate(format: "enabled == true")
         expectation(for: enabled, evaluatedWith: unified)
@@ -27,7 +28,7 @@ final class NativeEntryAccessibilityTests: XCTestCase {
         XCTAssertTrue(google.isSelected)
         XCTAssertFalse(ali.isSelected)
         XCTAssertTrue(assistant.isSelected)
-        let expected = ["阿里百炼", "Gemini版", "闪光灯", "慧眼", "导航", "教学", "实时慧眼", "直连筛图", "屏幕共享", "结束慧眼"]
+        let expected = ["阿里百炼", "Gemini版", "闪光灯", "慧眼", "导航", "教学", "实时慧眼", "直连筛图", "共享直连", "共享绿云", "结束慧眼"]
         // Exclude the live web page's changing controls from this native order check.
         let ordered = app.buttons.matching(NSPredicate(format: "label IN %@", expected))
             .allElementsBoundByIndex.map { $0.label }
@@ -47,6 +48,9 @@ final class NativeEntryAccessibilityTests: XCTestCase {
         XCTAssertTrue(unified.exists)
         XCTAssertFalse(direct.exists)
         XCTAssertTrue(app.buttons["nativeAliVideoAssistantButton"].exists)
+        XCTAssertTrue(app.buttons["nativeAliGoogleVoiceButton"].exists)
+        XCTAssertFalse(app.buttons["nativeDirectScreenShareButton"].exists)
+        XCTAssertFalse(app.buttons["nativeRelayScreenShareButton"].exists)
         XCTAssertTrue(app.buttons["nativeScreenShareButton"].exists)
         navigation.tap()
         XCTAssertTrue(navigation.isSelected)
@@ -73,7 +77,8 @@ final class NativeEntryAccessibilityTests: XCTestCase {
         assistant.tap()
         XCTAssertTrue(unified.waitForExistence(timeout: 20))
         XCTAssertTrue(direct.exists)
-        XCTAssertTrue(app.buttons["nativeScreenShareButton"].exists)
+        XCTAssertTrue(app.buttons["nativeDirectScreenShareButton"].exists)
+        XCTAssertTrue(app.buttons["nativeRelayScreenShareButton"].exists)
         XCTAssertTrue(app.buttons["nativeEndAssistantButton"].exists)
     }
 }

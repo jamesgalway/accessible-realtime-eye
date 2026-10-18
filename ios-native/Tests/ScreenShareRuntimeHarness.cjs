@@ -12,7 +12,7 @@ process.on('uncaughtException', error => { console.error(error.name + ': ' + err
 const check = (value, label) => { assert.ok(value, label); checks++; };
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
-function runtime(backend, adapter = true) {
+function runtime(backend, adapter = true, googleRoute = 'direct') {
   const commands = [], nativeTimers = new Map();
   let context;
   function event(value) { context.__screenEvent(value); }
@@ -40,7 +40,7 @@ function runtime(backend, adapter = true) {
         const health = { ok: true, appVariant: backend === 'aliyun' ? 'aliyun' : 'greencloud-gemini', geminiConfigured: true, realtimeWebSocketConfigured: true, bailianConfigured: true };
         const body = m.url.includes('/api/health') ? health
           : m.url.includes('/api/realtime/config') ? { webSocketConfigured: true, serverApiKeyConfigured: true }
-          : m.url.includes('/api/gemini-browser-config') ? { configured: true, apiKey: 'test-only-key', model: 'test', voice: 'Zephyr' }
+          : m.url.includes('/api/gemini-browser-config') ? { configured: true, apiKey: 'test-only-key', model: 'gemini-3.8-live', voice: 'Zephyr', transport: googleRoute === 'relay' ? 'server-proxy' : 'browser-direct' }
           : m.url.includes('/api/web-search') ? { results: [{ title: 'verified title', snippet: 'verified snippet', url: 'https://example.test/source' }] }
           : m.url.includes('generateContent') ? { candidates: [{ content: { parts: [{ text: 'verified response' }] } }] } : { ok: true };
         event({ kind: 'fetch', id: m.id, status: 200, body: JSON.stringify(body), headers: { 'content-type': 'application/json' } });
@@ -48,13 +48,14 @@ function runtime(backend, adapter = true) {
       case 'socket': setImmediate(() => {
         event({ kind: 'socket', id: m.id, type: 'open' });
         if (m.url.includes('/api/ws')) event({ kind: 'socket', id: m.id, type: 'message', data: '{"type":"proxy.ready","model":"test"}' });
+        if (m.url.includes('/api/gemini-live/ws')) event({ kind: 'socket', id: m.id, type: 'message', data: '{"type":"gemini.ready","model":"gemini-3.8-live","voice":"Zephyr"}' });
       }); break;
       case 'socketSend': if (JSON.parse(m.data).setup) setImmediate(() => event({ kind: 'socket', id: m.id, type: 'message', data: '{"setupComplete":{}}' })); break;
       case 'socketClose': setImmediate(() => event({ kind: 'socket', id: m.id, type: 'close', code: 1000 })); break;
     }
     return JSON.stringify(value);
   };
-  context = vm.createContext({ _screenHost: host, __screenBaseURL: 'https://example.test/', __screenBackend: backend });
+  context = vm.createContext({ _screenHost: host, __screenBaseURL: 'https://example.test/', __screenBackend: backend, __screenGoogleRoute: googleRoute });
   const run = source => vm.runInContext(source, context);
   run(environment);
   run(fs.readFileSync(path.join(resources, 'screen-google-sdk.js'), 'utf8'));
@@ -127,5 +128,31 @@ function runtime(backend, adapter = true) {
       check(candidate.commands.filter(x => x.op === 'socketSend').length === stoppedAt, 'stopped entry discards native microphone input');
     } finally { candidate.close(); baseline.close(); }
   }
+  const relay = runtime('greencloud', true, 'relay');
+  try {
+    await relay.run('__screenCommand("start")');
+    await flush(); await flush();
+    check(relay.run('__screenSnapshot().connected') === true, 'Google relay original entry connects');
+    check(relay.run('appState.geminiReminder.transport') === 'server-proxy', 'relay uses original Google server transport');
+    check(relay.commands.some(x => x.op === 'socket' && x.url.includes('example.test/api/gemini-live/ws?contract=1&replace=1&visualBase=1')), 'relay opens existing Huiyan gateway');
+    check(!relay.commands.some(x => x.op === 'socket' && x.url.includes('googleapis.com')), 'relay does not open phone Google direct socket');
+    check(!relay.commands.some(x => x.op === 'fetch' && x.url.includes('directScreen=1')), 'relay does not request direct-screen configuration');
+    const before = relay.commands.filter(x => x.op === 'socketSend').length;
+    relay.event({kind:'pcm',data:Buffer.alloc(6400).toString('base64')});
+    check(relay.commands.filter(x => x.op === 'socketSend').length > before, 'relay receives native microphone using existing handler');
+    relay.run('sendGeminiVideoFrame()');
+    check(relay.commands.some(x => x.op === 'socketSend' && JSON.parse(x.data).type === 'video' && JSON.parse(x.data).data === 'c2NyZWVu'), 'relay sends actual screen capture through original video protocol');
+    const socket=relay.commands.find(x => x.op === 'socket' && x.url.includes('/api/gemini-live/ws'));
+    relay.event({kind:'socket',id:socket.id,type:'message',data:JSON.stringify({type:'gemini.message',audioParts:[{data:Buffer.alloc(4800).toString('base64'),mimeType:'audio/pcm;rate=24000'}]})});
+    const audio=relay.commands.filter(x => x.op === 'audio').at(-1);
+    check(audio?.rate === 24000, 'relay model audio reaches existing PCM player and native output');
+    relay.event({kind:'audioEnded',id:audio.id});
+    check(relay.run('appState.geminiReminder.player.sources.length') === 0, 'relay native completion drains original audio queue');
+    relay.run('__screenCommand("stop")');
+    await flush();
+    const stopped = relay.commands.filter(x => x.op === 'socketSend').length;
+    relay.event({kind:'pcm',data:Buffer.alloc(6400).toString('base64')});
+    check(relay.commands.filter(x => x.op === 'socketSend').length === stopped, 'relay stops microphone after release');
+  } finally { relay.close(); }
   console.log('Screen sharing runtime:', checks, 'behavior checks passed; no live model calls.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

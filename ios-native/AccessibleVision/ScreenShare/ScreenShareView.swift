@@ -16,7 +16,7 @@ final class ScreenShareController: ObservableObject {
     private var identity = UUID()
     private var connectionError: String?
 
-    func prepare(backend: AssistantBackend) {
+    func prepare(backend: AssistantBackend, googleRoute: ScreenShareGoogleRoute) {
         guard !prepared, !preparing else { return }
         stop()
         preparing = true; status = "正在准备屏幕共享。"
@@ -41,7 +41,7 @@ final class ScreenShareController: ObservableObject {
         }
         task = Task { [weak self] in
             do {
-                try await runtime.load(backend: backend)
+                try await runtime.load(backend: backend, googleRoute: googleRoute)
                 try Task.checkCancellation()
                 try await runtime.audio.start()
                 try Task.checkCancellation()
@@ -79,6 +79,7 @@ final class ScreenShareController: ObservableObject {
 
 struct ScreenShareView: View {
     let backend: AssistantBackend
+    let googleRoute: ScreenShareGoogleRoute
     @ObservedObject var controller: ScreenShareController
     @State private var showConversation = false
     var body: some View {
@@ -87,7 +88,7 @@ struct ScreenShareView: View {
                 Text("屏幕共享").font(.title2).accessibilityAddTraits(.isHeader)
                 Text(controller.status)
                 if !controller.prepared {
-                    Button(controller.preparing ? "正在准备" : "开始屏幕共享") { controller.prepare(backend: backend) }
+                    Button(controller.preparing ? "正在准备" : "开始屏幕共享") { controller.prepare(backend: backend, googleRoute: googleRoute) }
                         .disabled(controller.preparing)
                 } else {
                     ScreenBroadcastPicker(presentationRequest: controller.broadcastPresentation)
@@ -105,7 +106,7 @@ struct ScreenShareView: View {
             .buttonStyle(.bordered)
             .padding()
         }
-        .task { controller.prepare(backend: backend) }
+        .task { controller.prepare(backend: backend, googleRoute: googleRoute) }
     }
 }
 
