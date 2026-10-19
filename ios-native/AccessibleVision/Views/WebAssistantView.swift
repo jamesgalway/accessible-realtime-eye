@@ -18,6 +18,7 @@ struct WebAssistantView: View {
     @State private var mediaCaptureRequested = false
 
     private var teachingMode: Bool { selectedSection == .teaching }
+    private var screenSharingPageVisible: Bool { screenSharingMode && !screenSharingPageHidden }
 
     private var selectedURL: URL {
         teachingMode ? selectedBackend.teachingBaseURL : selectedBackend.baseURL
@@ -27,7 +28,7 @@ struct WebAssistantView: View {
         GeometryReader { viewport in
         ScrollView {
         VStack(spacing: 0) {
-            if screenSharingMode && !screenSharingPageHidden {
+            if screenSharingPageVisible {
                 HStack {
                     Button("返回慧眼主界面") { screenSharingPageHidden = true }
                         .accessibilityIdentifier("nativeScreenShareBackButton")
@@ -37,6 +38,7 @@ struct WebAssistantView: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 8)
             }
+            if !screenSharingPageVisible {
             HStack(spacing: 12) {
                 backendButton(.aliyun)
                 backendButton(.greenCloud)
@@ -117,8 +119,13 @@ struct WebAssistantView: View {
 
             Divider()
                 .accessibilityHidden(true)
+            if screenSharingMode {
+                ScreenShareTaskContent(controller: screenSharing)
+                    .padding(.horizontal, 16)
+            }
+            }
 
-            if screenSharingMode && !screenSharingPageHidden {
+            if screenSharingPageVisible {
                 ScreenShareView(backend: selectedBackend, googleRoute: googleScreenRoute, controller: screenSharing)
                     .id("\(selectedBackend.rawValue):\(googleScreenRoute.rawValue):\(screenSharingEntryID)")
                     .frame(height: max(320, viewport.size.height - 270))

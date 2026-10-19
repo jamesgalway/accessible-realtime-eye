@@ -100,7 +100,6 @@ struct ScreenShareView: View {
     let backend: AssistantBackend
     let googleRoute: ScreenShareGoogleRoute
     @ObservedObject var controller: ScreenShareController
-    @State private var showConversation = false
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -112,19 +111,31 @@ struct ScreenShareView: View {
                 } else {
                     ScreenBroadcastPicker(presentationRequest: controller.broadcastPresentation)
                         .frame(height: 54)
-                    if controller.started && controller.stopLabel.contains("持续播报") {
-                        Button(controller.stopLabel) { controller.stopTask() }
-                    }
-                }
-                if !controller.transcript.isEmpty {
-                    Button(showConversation ? "折叠互动内容" : "展开互动内容") { showConversation.toggle() }
-                    if showConversation { Text(controller.transcript).textSelection(.enabled) }
                 }
             }
             .buttonStyle(.bordered)
             .padding()
         }
         .task { controller.prepare(backend: backend, googleRoute: googleRoute) }
+    }
+}
+
+/// Task and optional transcript controls stay on the main page while the
+/// dedicated broadcast page contains only its start picker and return button.
+struct ScreenShareTaskContent: View {
+    @ObservedObject var controller: ScreenShareController
+    @State private var showConversation = false
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if controller.started && controller.stopLabel.contains("持续播报") {
+                Button(controller.stopLabel) { controller.stopTask() }
+            }
+            if !controller.transcript.isEmpty {
+                Button(showConversation ? "折叠互动内容" : "展开互动内容") { showConversation.toggle() }
+                if showConversation { Text(controller.transcript).textSelection(.enabled) }
+            }
+        }
+        .buttonStyle(.bordered)
     }
 }
 
