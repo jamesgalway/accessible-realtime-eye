@@ -1,5 +1,6 @@
 import SwiftUI
 import AppIntents
+import OSLog
 
 /// Both Shortcuts and the public URL entry request the existing screen view.
 /// The view consumes the request only after its scene becomes active.
@@ -7,8 +8,12 @@ import AppIntents
 final class ScreenShareLaunchRouter: ObservableObject {
     static let shared = ScreenShareLaunchRouter()
     @Published private(set) var pendingRequest: UUID?
+    private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "AccessibleVision", category: "ScreenShareShortcut")
 
-    func request() { pendingRequest = UUID() }
+    func request() {
+        logger.notice("screen_share.shortcut_requested")
+        pendingRequest = UUID()
+    }
 
     func handle(_ url: URL) {
         guard url.scheme?.lowercased() == "huiyan-screen",
@@ -21,6 +26,7 @@ final class ScreenShareLaunchRouter: ObservableObject {
 
     func consume() -> Bool {
         guard pendingRequest != nil else { return false }
+        logger.notice("screen_share.shortcut_consumed")
         pendingRequest = nil
         return true
     }
