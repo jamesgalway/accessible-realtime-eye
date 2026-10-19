@@ -9,6 +9,7 @@ struct WebAssistantView: View {
     private enum Section: String { case assistant, navigation, teaching }
     @State private var selectedSection: Section = .assistant
     @State private var screenSharingMode = false
+    @State private var screenSharingPageHidden = false
     @State private var googleScreenRoute: ScreenShareGoogleRoute = .direct
     @StateObject private var screenSharing = ScreenShareController()
     @StateObject private var screenLaunch = ScreenShareLaunchRouter.shared
@@ -26,6 +27,16 @@ struct WebAssistantView: View {
         GeometryReader { viewport in
         ScrollView {
         VStack(spacing: 0) {
+            if screenSharingMode && !screenSharingPageHidden {
+                HStack {
+                    Button("返回慧眼主界面") { screenSharingPageHidden = true }
+                        .accessibilityIdentifier("nativeScreenShareBackButton")
+                    Spacer(minLength: 0)
+                }
+                .buttonStyle(.bordered)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+            }
             HStack(spacing: 12) {
                 backendButton(.aliyun)
                 backendButton(.greenCloud)
@@ -107,7 +118,7 @@ struct WebAssistantView: View {
             Divider()
                 .accessibilityHidden(true)
 
-            if screenSharingMode {
+            if screenSharingMode && !screenSharingPageHidden {
                 ScreenShareView(backend: selectedBackend, googleRoute: googleScreenRoute, controller: screenSharing)
                     .id("\(selectedBackend.rawValue):\(googleScreenRoute.rawValue):\(screenSharingEntryID)")
                     .frame(height: max(320, viewport.size.height - 270))
@@ -210,6 +221,7 @@ struct WebAssistantView: View {
 
     private func stopCurrentPageMedia() {
         screenSharing.stop()
+        screenSharingPageHidden = false
         assistantEntries.cancelPending()
         mediaCaptureRequested = false
         setIdleTimerDisabled(false)
@@ -235,7 +247,10 @@ struct WebAssistantView: View {
     }
 
     private func openScreenShare(_ route: ScreenShareGoogleRoute) {
-        guard !screenSharingMode || googleScreenRoute != route else { return }
+        if screenSharingMode, googleScreenRoute == route {
+            screenSharingPageHidden = false
+            return
+        }
         stopCurrentPageMedia()
         googleScreenRoute = route
         screenSharingMode = true
@@ -245,6 +260,7 @@ struct WebAssistantView: View {
         guard scenePhase == .active, screenLaunch.consume() else { return }
         if selectedBackend == .greenCloud, selectedSection == .assistant, screenSharingMode,
            screenSharing.preparing || screenSharing.prepared {
+            screenSharingPageHidden = false
             screenSharing.requestBroadcastPanelIfNeeded()
             return
         }
