@@ -170,7 +170,13 @@ struct WebAssistantView: View {
             Text(torch.errorMessage)
         }
         .onAppear { consumeScreenShareShortcut() }
+        .onOpenURL { url in
+            if screenLaunch.handle(url) { consumeScreenShareShortcut() }
+        }
         .onChange(of: screenLaunch.pendingRequest) { _ in consumeScreenShareShortcut() }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            consumeScreenShareShortcut()
+        }
         .onDisappear {
             screenSharing.stop()
             setIdleTimerDisabled(false)
@@ -264,7 +270,8 @@ struct WebAssistantView: View {
     }
 
     private func consumeScreenShareShortcut() {
-        guard scenePhase == .active, screenLaunch.consume() else { return }
+        guard UIApplication.shared.applicationState == .active || scenePhase == .active,
+              screenLaunch.consume() else { return }
         if selectedBackend == .greenCloud, selectedSection == .assistant, screenSharingMode,
            screenSharing.preparing || screenSharing.prepared {
             screenSharingPageHidden = false

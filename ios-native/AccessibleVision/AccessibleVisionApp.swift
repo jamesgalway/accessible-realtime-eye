@@ -10,7 +10,6 @@ struct AccessibleVisionApp: App {
     var body: some Scene {
         WindowGroup {
             WebAssistantView()
-                .onOpenURL { ScreenShareLaunchRouter.shared.handle($0) }
         }
     }
 }
