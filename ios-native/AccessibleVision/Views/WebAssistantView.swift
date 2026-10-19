@@ -11,6 +11,8 @@ struct WebAssistantView: View {
     @State private var screenSharingMode = false
     @State private var googleScreenRoute: ScreenShareGoogleRoute = .direct
     @StateObject private var screenSharing = ScreenShareController()
+    @StateObject private var screenLaunch = ScreenShareLaunchRouter.shared
+    @State private var screenSharingEntryID = UUID()
     @StateObject private var assistantEntries = NativeAssistantEntryController()
     @State private var mediaCaptureRequested = false
 
@@ -107,7 +109,7 @@ struct WebAssistantView: View {
 
             if screenSharingMode {
                 ScreenShareView(backend: selectedBackend, googleRoute: googleScreenRoute, controller: screenSharing)
-                    .id("\(selectedBackend.rawValue):\(googleScreenRoute.rawValue)")
+                    .id("\(selectedBackend.rawValue):\(googleScreenRoute.rawValue):\(screenSharingEntryID)")
                     .frame(height: max(320, viewport.size.height - 270))
             } else {
             GreenCloudWebView(
@@ -149,6 +151,8 @@ struct WebAssistantView: View {
         } message: {
             Text(torch.errorMessage)
         }
+        .onAppear { consumeScreenShareShortcut() }
+        .onChange(of: screenLaunch.pendingRequest) { _ in consumeScreenShareShortcut() }
         .onDisappear {
             screenSharing.stop()
             setIdleTimerDisabled(false)
@@ -156,6 +160,7 @@ struct WebAssistantView: View {
             camera.stop()
         }
         .onChange(of: scenePhase) { newPhase in
+            if newPhase == .active { consumeScreenShareShortcut() }
             if newPhase == .active, mediaCaptureRequested {
                 setIdleTimerDisabled(true)
                 camera.start()
@@ -233,6 +238,21 @@ struct WebAssistantView: View {
         guard !screenSharingMode || googleScreenRoute != route else { return }
         stopCurrentPageMedia()
         googleScreenRoute = route
+        screenSharingMode = true
+    }
+
+    private func consumeScreenShareShortcut() {
+        guard scenePhase == .active, screenLaunch.consume() else { return }
+        if selectedBackend == .greenCloud, selectedSection == .assistant, screenSharingMode,
+           screenSharing.preparing || screenSharing.prepared {
+            screenSharing.requestBroadcastPanelIfNeeded()
+            return
+        }
+        stopCurrentPageMedia()
+        selectedBackend = .greenCloud
+        selectedSection = .assistant
+        googleScreenRoute = .direct
+        screenSharingEntryID = UUID()
         screenSharingMode = true
     }
 }

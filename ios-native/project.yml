@@ -33,6 +33,10 @@ targets:
         CFBundleLocalizations:
           - zh-Hans
         CFBundleDisplayName: "实时慧眼"
+        CFBundleURLTypes:
+          - CFBundleURLName: com.zzypiano.accessiblevision.screen-share
+            CFBundleURLSchemes:
+              - huiyan-screen
         UIBackgroundModes:
           - audio
         UIApplicationSceneManifest:

@@ -81,6 +81,10 @@ final class ScreenShareController: ObservableObject {
             }
         }
     }
+    func requestBroadcastPanelIfNeeded() {
+        guard prepared, !started else { return }
+        broadcastPresentation += 1
+    }
     func stopTask() { runtime?.command("stopTask") }
     func stop(message: String = "屏幕共享已结束。") {
         identity = UUID(); task?.cancel(); task = nil
