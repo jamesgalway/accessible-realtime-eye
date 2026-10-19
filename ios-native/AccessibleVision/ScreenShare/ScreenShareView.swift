@@ -115,7 +115,6 @@ struct ScreenShareView: View {
                     if controller.started && controller.stopLabel.contains("持续播报") {
                         Button(controller.stopLabel) { controller.stopTask() }
                     }
-                    Button("结束屏幕共享") { controller.stop() }
                 }
                 if !controller.transcript.isEmpty {
                     Button(showConversation ? "折叠互动内容" : "展开互动内容") { showConversation.toggle() }

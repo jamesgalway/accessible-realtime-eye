@@ -98,7 +98,7 @@ struct WebAssistantView: View {
                             .accessibilityIdentifier("nativeScreenShareButton")
                             .accessibilityValue(screenSharingMode ? "已选择" : "未选择")
                     }
-                    Button("结束慧眼") {
+                    Button(screenSharingMode ? "结束共享" : "结束慧眼") {
                         if screenSharingMode {
                             stopCurrentPageMedia()
                             screenSharingMode = false
