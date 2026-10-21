@@ -18,6 +18,10 @@ on:
         description: "Run the optional simulator UI check (known app-launch timeout)"
         type: boolean
         default: false
+      verify_js_core:
+        description: "Run the optional existing JavaScriptCore probe (known timeout)"
+        type: boolean
+        default: false
   push:
     branches:
       - ios-native-minicpm35b-lab-20261021
@@ -75,7 +79,7 @@ jobs:
         # Unmodified build71 screen runtime: the existing macOS smoke reports
         # "did not complete: undefined". Keep it explicitly available without
         # making this isolated native model experiment depend on that old probe.
-        if: github.event_name == 'workflow_dispatch' && inputs.run_runtime_checks
+        if: github.event_name == 'workflow_dispatch' && inputs.verify_js_core
         run: swift ios-native/Tests/ScreenShareJSCoreSmoke.swift ios-native
 
       - name: Verify native screen WebSocket enrollment
