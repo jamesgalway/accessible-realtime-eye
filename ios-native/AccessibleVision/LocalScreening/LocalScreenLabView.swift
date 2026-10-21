@@ -105,7 +105,7 @@ struct LocalScreenLabView: View {
         NavigationStack {
             Form {
                 Section {
-                    Text("35B本地筛图实验。结果用于测试，暂不触发主动提醒。开启慧眼后可以筛当前画面，也可以选择照片。")
+                    Text("35B本地筛图实验。结果用于测试，暂不触发主动提醒。先在阿里入口开启实时慧眼，再筛当前画面；也可以只选照片测试。本地筛图单独计时，不等待语音。")
                     Text(store.status)
                     Button("下载或继续下载模型") { store.download() }
                         .disabled(store.busy || store.ready || lab.busy)

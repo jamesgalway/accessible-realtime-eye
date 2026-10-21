@@ -116,9 +116,11 @@ struct WebAssistantView: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 8)
                 if !assistantEntries.status.isEmpty { Text(assistantEntries.status) }
-                Button("本地筛图实验") { showLocalScreenLab = true }
-                    .buttonStyle(.bordered)
-                    .padding(.bottom, 8)
+                if selectedBackend == .aliyun {
+                    Button("本地筛图实验（阿里声音）") { showLocalScreenLab = true }
+                        .buttonStyle(.bordered)
+                        .padding(.bottom, 8)
+                }
             }
 
             Divider()

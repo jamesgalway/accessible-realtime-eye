@@ -5,8 +5,8 @@
   "modelRevision": "8716e5209f308fd53f197ccd7d50c6fdcc2dc37d",
   "modelBytes": 16623585508,
   "bridgeSha256": {
-    "MBMtmd.h": "8d267d9f34771ee74548126918df005b2867af419217fc653e2895e539908d0f",
-    "MBMtmd.mm": "3c78f74907d73ab58aa59733539cd8f98fab3f86917660bccf0e0955d3d246d7",
-    "MBPrewarmTable.h": "e2676466267b82f70c2641417db8af6b5c595e7a66e22f25240a7f6873bd1cfa"
+    "MBMtmd.h": "a50faff723c7f4afbeb22eb6fffa25c771fc48fb5eb8351b65435e6504ce79cb",
+    "MBMtmd.mm": "087a5a1570b8e4c41eed19577528b050d509e009dc7eabee2cd88394d4d6848c",
+    "MBPrewarmTable.h": "5d223b1bf9d02388e87892fbd87683fc90f502b07a6a32d55d69be69f8747209"
   }
 }

@@ -45,6 +45,11 @@ final class LocalModelStore: ObservableObject {
 
     func refresh() {
         guard let catalog else { ready = false; status = "模型文件清单没有载入。"; return }
+        if FileManager.default.fileExists(atPath: Self.directory.path) {
+            var directory = Self.directory
+            var resource = URLResourceValues(); resource.isExcludedFromBackup = true
+            try? directory.setResourceValues(resource)
+        }
         let saved = receipt()
         ready = catalog.files.allSatisfy { verified($0, receipt: saved) }
         if ready { status = "35B模型文件已准备，可以加载。" }
