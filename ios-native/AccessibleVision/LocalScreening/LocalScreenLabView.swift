@@ -18,8 +18,14 @@ final class LocalScreenLab: ObservableObject {
         busy = true; defer { busy = false }
         if !loaded {
             status = "正在加载本地主动提醒模型。"
-            let ms = try await engine.load(directory: LocalModelStore.directory)
-            loaded = true; record(["event":"model_loaded","loadMs":ms])
+            record(["event":"model_load_started","availableBytes":huiyan_local_available_memory(),"footprintBytes":huiyan_local_footprint()])
+            do {
+                let ms = try await engine.load(directory: LocalModelStore.directory)
+                loaded = true; record(["event":"model_loaded","loadMs":ms])
+            } catch {
+                record(["event":"model_load_failed","error":error.localizedDescription,"availableBytes":huiyan_local_available_memory()])
+                throw error
+            }
         }
         localReminders = true
         status = "本地主动提醒已启用。返回阿里慧眼，直接说需要提醒的条件。"

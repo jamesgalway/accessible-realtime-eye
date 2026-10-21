@@ -46,20 +46,29 @@ final class LocalScreenEngine: @unchecked Sendable {
                     if let context { mb_mtmd_free(context); self.context = nil }
                     let started = ProcessInfo.processInfo.systemUptime
                     var params = mb_mtmd_params_default()
-                    params.n_predict = 160; params.n_ctx = 4096; params.n_ubatch = 512
+                    params.n_predict = 160; params.n_ctx = 4096; params.n_ubatch = 256
                     params.temperature = 0; params.image_max_slice_nums = 1
                     params.moe_slot_bank = 256
-                    params.moe_lookahead_prefetch_depth = 8
-                    // Same per-slot weight bytes and reserve principle as the pinned
-                    // upstream iOS implementation. Reserve extra space for Live/camera.
+                    // Use upstream's actual 4k-context reserve and shrink the cache,
+                    // including its supported zero-window mode. A speculative memory
+                    // estimate must not prevent the engine attempting allocation.
                     let available = Int64(huiyan_local_available_memory())
                     let slotBytes: Int64 = (346_030_080 / 256) * 40
-                    let budget = available - 3_000_000_000
-                    guard budget > slotBytes * 16 else { throw LocalScreenError.message("当前可用内存不足，请先停止其他大型任务后重试加载。") }
-                    cacheSlots = max(8, min(48, Int(budget / slotBytes) - 8) / 8 * 8)
+                    let footprint = Int64(huiyan_local_footprint())
+                    let physicalGiB = Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824
+                    let ceiling = Int64(physicalGiB >= 13.5 ? 11 : physicalGiB >= 9.5 ? 6 : 5) * 1_073_741_824
+                    let headroom = max(0, min(available > 0 ? available : ceiling - footprint, ceiling - footprint))
+                    let reserve: Int64 = 2440 * 1_048_576
+                    let affordable = max(0, Int((headroom - reserve) / slotBytes))
+                    cacheSlots = min(32, max(0, affordable - 8) / 8 * 8)
+                    params.moe_lookahead_prefetch_depth = cacheSlots > 0 ? 8 : 0
                     params.moe_decode_window = Int32(cacheSlots)
-                    params.moe_prewarm_level = Int32(min(32, cacheSlots))
+                    params.moe_prewarm_level = Int32(min(16, cacheSlots))
                     params.spec_draft_n_max = 0
+                    let plan: [String:Any] = ["availableBytes":available,"footprintBytes":footprint,"physicalBytes":ProcessInfo.processInfo.physicalMemory,
+                        "headroomBytes":headroom,"reserveBytes":reserve,"cacheSlots":cacheSlots,"ubatch":256,"activeExpertsPerLayer":8]
+                    let planURL = FileManager.default.urls(for:.documentDirectory,in:.userDomainMask)[0].appendingPathComponent("local-screen-memory-plan.json")
+                    try JSONSerialization.data(withJSONObject:plan,options:[.sortedKeys]).write(to:planURL,options:.atomic)
                     let model = directory.appendingPathComponent(Self.model).path
                     let vision = directory.appendingPathComponent("mmproj-model-f16.gguf").path
                     let experts = directory.appendingPathComponent("experts").path
