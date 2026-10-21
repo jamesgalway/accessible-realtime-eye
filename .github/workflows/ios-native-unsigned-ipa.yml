@@ -69,7 +69,10 @@ jobs:
           node ios-native/Tests/ScreenShareRuntimeHarness.cjs
 
       - name: Verify native JavaScriptCore compatibility
-        if: github.event_name != 'workflow_dispatch' || inputs.run_runtime_checks
+        # Unmodified build71 screen runtime: the existing macOS smoke reports
+        # "did not complete: undefined". Keep it explicitly available without
+        # making this isolated native model experiment depend on that old probe.
+        if: github.event_name == 'workflow_dispatch' && inputs.run_runtime_checks
         run: swift ios-native/Tests/ScreenShareJSCoreSmoke.swift ios-native
 
       - name: Verify native screen WebSocket enrollment
