@@ -65,17 +65,47 @@ final class LocalScreenEngine: @unchecked Sendable {
                     params.moe_decode_window = Int32(cacheSlots)
                     params.moe_prewarm_level = Int32(min(16, cacheSlots))
                     params.spec_draft_n_max = 0
-                    let plan: [String:Any] = ["availableBytes":available,"footprintBytes":footprint,"physicalBytes":ProcessInfo.processInfo.physicalMemory,
+                    var plan: [String:Any] = ["availableBytes":available,"footprintBytes":footprint,"physicalBytes":ProcessInfo.processInfo.physicalMemory,
                         "headroomBytes":headroom,"reserveBytes":reserve,"cacheSlots":cacheSlots,"ubatch":256,"activeExpertsPerLayer":8]
                     let planURL = FileManager.default.urls(for:.documentDirectory,in:.userDomainMask)[0].appendingPathComponent("local-screen-memory-plan.json")
-                    try JSONSerialization.data(withJSONObject:plan,options:[.sortedKeys]).write(to:planURL,options:.atomic)
+                    try? JSONSerialization.data(withJSONObject:plan,options:[.sortedKeys]).write(to:planURL,options:.atomic)
                     let model = directory.appendingPathComponent(Self.model).path
                     let vision = directory.appendingPathComponent("mmproj-model-f16.gguf").path
                     let experts = directory.appendingPathComponent("experts").path
-                    let created = model.withCString { modelPath in vision.withCString { visionPath in experts.withCString { expertsPath in
-                        mb_mtmd_init(modelPath, visionPath, expertsPath, nil, &params)
-                    } } }
-                    guard let created else { throw LocalScreenError.message(String(cString: mb_mtmd_last_init_error())) }
+                    let visionLog = planURL.deletingLastPathComponent().appendingPathComponent("local-screen-vision-load.log").path
+                    visionLog.withCString { huiyan_local_vision_log_begin($0) }
+                    defer { huiyan_local_vision_log_end() }
+                    func initialize() -> OpaquePointer? {
+                        model.withCString { modelPath in vision.withCString { visionPath in experts.withCString { expertsPath in
+                            mb_mtmd_init(modelPath, visionPath, expertsPath, nil, &params)
+                        } } }
+                    }
+                    var created = initialize()
+                    plan["visionBackend"] = "gpu"
+                    if created == nil {
+                        let bridgeError = String(cString: mb_mtmd_last_init_error())
+                        let visionError = String(cString: huiyan_local_vision_error())
+                        plan["visionGPUError"] = visionError.isEmpty ? bridgeError : visionError
+                        if bridgeError.contains("Failed to load mmproj"), huiyan_local_vision_cpu_retryable() != 0, current(token) {
+                            // A failed init has already released its context. Retry only
+                            // the vision device; leave the language/MoE GPU settings intact.
+                            params.mmproj_use_gpu = false
+                            huiyan_local_vision_log_clear_error()
+                            plan["visionBackend"] = "cpu"
+                            try? JSONSerialization.data(withJSONObject:plan,options:[.sortedKeys]).write(to:planURL,options:.atomic)
+                            created = initialize()
+                        }
+                    }
+                    if created == nil {
+                        let visionError = String(cString: huiyan_local_vision_error())
+                        let bridgeError = String(cString: mb_mtmd_last_init_error())
+                        plan["visionLoadError"] = visionError.isEmpty ? bridgeError : visionError
+                    }
+                    try? JSONSerialization.data(withJSONObject:plan,options:[.sortedKeys]).write(to:planURL,options:.atomic)
+                    guard let created else {
+                        let detail = String(cString: huiyan_local_vision_error()).trimmingCharacters(in:.whitespacesAndNewlines)
+                        throw LocalScreenError.message(detail.isEmpty ? String(cString: mb_mtmd_last_init_error()) : detail)
+                    }
                     guard current(token) else { mb_mtmd_free(created); throw CancellationError() }
                     mb_mtmd_set_model_version(created, 47)
                     mb_mtmd_set_enable_thinking(created, false)
