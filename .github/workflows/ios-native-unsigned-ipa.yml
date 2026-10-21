@@ -1,4 +1,4 @@
-name: Build Private iPhone Screen Sharing IPA
+name: Build Private iPhone Local Screening Experiment
 
 permissions:
   contents: read
@@ -20,7 +20,7 @@ on:
         default: false
   push:
     branches:
-      - ios-native-screen-share-20261018
+      - ios-native-minicpm35b-lab-20261021
     paths:
       - "ios-native/**"
       - ".github/workflows/ios-native-unsigned-ipa.yml"
@@ -32,13 +32,22 @@ jobs:
     env:
       DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
       HUIYAN_UI_SIM_RUNTIME: iOS-18-5
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Check out source
         uses: actions/checkout@v4
 
       - name: Install XcodeGen
         run: brew install xcodegen
+
+      - name: Restore pinned native model runtime
+        uses: actions/cache@v4
+        with:
+          path: ios-native/LocalScreeningFramework/llama.xcframework
+          key: minicpm35b-fa9d837-96bbf61-xcode16.4-device-v1
+
+      - name: Build pinned local vision runtime without model weights
+        run: bash .github/scripts/build-local-screen35b.sh
 
       - name: Build isolated screen runtime
         working-directory: ios-native/ScreenShareBuild

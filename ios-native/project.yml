@@ -3,7 +3,7 @@ options:
   developmentLanguage: zh-Hans
   bundleIdPrefix: com.zzypiano
   deploymentTarget:
-    iOS: "16.0"
+    iOS: "16.4"
 settings:
   base:
     SWIFT_VERSION: "5.9"
@@ -26,6 +26,11 @@ targets:
     dependencies:
       - target: ScreenBroadcastExtension
         embed: true
+      - framework: LocalScreeningFramework/llama.xcframework
+        embed: true
+      - sdk: Metal.framework
+      - sdk: Accelerate.framework
+      - sdk: CoreML.framework
     info:
       path: AccessibleVision/Info.plist
       properties:
@@ -33,6 +38,8 @@ targets:
         CFBundleLocalizations:
           - zh-Hans
         CFBundleDisplayName: "实时慧眼"
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
         CFBundleURLTypes:
           - CFBundleURLName: com.zzypiano.accessiblevision.screen-share
             CFBundleURLSchemes:
@@ -53,6 +60,9 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.zzypiano.accessiblevision.dev
         TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_OBJC_BRIDGING_HEADER: AccessibleVision/LocalScreening/LocalScreening-Bridging-Header.h
+        CLANG_CXX_LANGUAGE_STANDARD: c++17
+        CODE_SIGN_ENTITLEMENTS: AccessibleVision/LocalScreening/LocalScreening.entitlements
   ScreenBroadcastExtension:
     type: app-extension
     platform: iOS

@@ -1,0 +1,12 @@
+{
+  "upstreamCommit": "fa9d837e3d38dfde7a9484ec1cc6bc2e5bc9b420",
+  "engineCommit": "96bbf61710d44421ea54e63f5194f9b17c20d877",
+  "baseNativeCommit": "4e1a612a26048768cb8c02b6a846c6517009e5d5",
+  "modelRevision": "8716e5209f308fd53f197ccd7d50c6fdcc2dc37d",
+  "modelBytes": 16623585508,
+  "bridgeSha256": {
+    "MBMtmd.h": "8d267d9f34771ee74548126918df005b2867af419217fc653e2895e539908d0f",
+    "MBMtmd.mm": "3c78f74907d73ab58aa59733539cd8f98fab3f86917660bccf0e0955d3d246d7",
+    "MBPrewarmTable.h": "e2676466267b82f70c2641417db8af6b5c595e7a66e22f25240a7f6873bd1cfa"
+  }
+}

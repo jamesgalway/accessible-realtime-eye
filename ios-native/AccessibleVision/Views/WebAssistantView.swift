@@ -16,6 +16,7 @@ struct WebAssistantView: View {
     @State private var screenSharingEntryID = UUID()
     @StateObject private var assistantEntries = NativeAssistantEntryController()
     @State private var mediaCaptureRequested = false
+    @State private var showLocalScreenLab = false
 
     private var teachingMode: Bool { selectedSection == .teaching }
     private var screenSharingPageVisible: Bool { screenSharingMode && !screenSharingPageHidden }
@@ -115,6 +116,9 @@ struct WebAssistantView: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 8)
                 if !assistantEntries.status.isEmpty { Text(assistantEntries.status) }
+                Button("本地筛图实验") { showLocalScreenLab = true }
+                    .buttonStyle(.bordered)
+                    .padding(.bottom, 8)
             }
 
             Divider()
@@ -169,6 +173,7 @@ struct WebAssistantView: View {
         } message: {
             Text(torch.errorMessage)
         }
+        .sheet(isPresented: $showLocalScreenLab) { LocalScreenLabView(camera: camera) }
         .onAppear { consumeScreenShareShortcut() }
         .onOpenURL { url in
             if screenLaunch.handle(url) { consumeScreenShareShortcut() }
