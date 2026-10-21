@@ -38,6 +38,10 @@ struct GreenCloudWebView: UIViewRepresentable {
             forMainFrameOnly: true
         ))
         configuration.userContentController.add(context.coordinator, name: "nativeVision")
+        if backend == .aliyun, presentationSection == "assistant" {
+            configuration.userContentController.addUserScript(WKUserScript(source:LocalScreenReminderBridge.script,injectionTime:.atDocumentStart,forMainFrameOnly:true))
+            configuration.userContentController.add(context.coordinator,name:"nativeLocalScreen")
+        }
         configuration.userContentController.addUserScript(WKUserScript(
             source: NativeLocationBridge.script,
             injectionTime: .atDocumentStart,
@@ -87,17 +91,19 @@ struct GreenCloudWebView: UIViewRepresentable {
         coordinator.releaseMediaResources(in: webView)
         coordinator.detach()
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "nativeVision")
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "nativeLocalScreen")
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "nativeLocation")
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "nativeFind")
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "teachingViewpoint")
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "nativeAssistantEntries")
     }
 
-    final class Coordinator: NSObject, WKUIDelegate, WKNavigationDelegate, WKScriptMessageHandler {
+    @MainActor final class Coordinator: NSObject, WKUIDelegate, WKNavigationDelegate, WKScriptMessageHandler {
         private let location: NativeLocationBridge
         private let find: NativeFindBridge
         private let teachingViewpoint: TeachingViewpointBridge
         private let audioDiagnostics = NativeAudioDiagnostics()
+        private let localScreen: LocalScreenReminderBridge
         private let origin: URL
         private let camera: NativeCameraService
         private let onMediaCaptureRequested: () -> Void
@@ -119,6 +125,7 @@ struct GreenCloudWebView: UIViewRepresentable {
             presentationSection: String
         ) {
             self.origin = origin
+            self.localScreen = LocalScreenReminderBridge(origin:origin)
             self.location = NativeLocationBridge(origin: origin)
             self.find = NativeFindBridge(origin: origin, camera: camera)
             self.teachingViewpoint = TeachingViewpointBridge(origin: origin, camera: camera)
@@ -131,6 +138,7 @@ struct GreenCloudWebView: UIViewRepresentable {
 
         func attach(to webView: WKWebView) {
             self.webView = webView
+            localScreen.attach(webView)
             entryController?.attach(webView)
             audioDiagnostics.onSnapshot = { [weak self] packet in
                 guard let self, self.webReady, let currentWebView = self.webView,
@@ -165,6 +173,7 @@ struct GreenCloudWebView: UIViewRepresentable {
         }
 
         func detach() {
+            localScreen.detach()
             if let webView { entryController?.detach(webView) }
             accessTask?.cancel()
             accessTask = nil
@@ -208,6 +217,7 @@ struct GreenCloudWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            localScreen.cancel()
             audioDiagnostics.stop()
             find.stop()
             teachingViewpoint.stop()
@@ -247,6 +257,7 @@ struct GreenCloudWebView: UIViewRepresentable {
             _ userContentController: WKUserContentController,
             didReceive message: WKScriptMessage
         ) {
+            if message.name == "nativeLocalScreen" { localScreen.receive(message); return }
             if message.name == "nativeAssistantEntries", let webView {
                 entryController?.receive(message, in: webView)
                 return
@@ -267,6 +278,7 @@ struct GreenCloudWebView: UIViewRepresentable {
                 onMediaCaptureRequested()
                 if let url = webView?.url, isTeachingURL(url) { audioDiagnostics.start() }
             } else if type == "nativeMediaReleased" {
+                localScreen.cancel()
                 audioDiagnostics.stop()
                 onMediaCaptureReleased()
             } else if type == "fallbackWebCamera" {

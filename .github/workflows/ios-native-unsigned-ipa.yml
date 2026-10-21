@@ -67,6 +67,7 @@ jobs:
           node ios-native/Tests/NativeAssistantEntryHarness.cjs
           node ios-native/Tests/AppLaunchLifecycleHarness.js
           node ios-native/Tests/ScreenShareRuntimeHarness.cjs
+          node ios-native/Tests/LocalScreenReminderHarness.cjs
 
       - name: Verify native JavaScriptCore compatibility
         # Unmodified build71 screen runtime: the existing macOS smoke reports

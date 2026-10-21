@@ -17,6 +17,9 @@ struct WebAssistantView: View {
     @StateObject private var assistantEntries = NativeAssistantEntryController()
     @State private var mediaCaptureRequested = false
     @State private var showLocalScreenLab = false
+    @StateObject private var localScreen = LocalScreenLab.shared
+    @State private var localScreenStarting = false
+    @State private var localScreenStatus = ""
 
     private var teachingMode: Bool { selectedSection == .teaching }
     private var screenSharingPageVisible: Bool { screenSharingMode && !screenSharingPageHidden }
@@ -117,9 +120,27 @@ struct WebAssistantView: View {
                 .padding(.bottom, 8)
                 if !assistantEntries.status.isEmpty { Text(assistantEntries.status) }
                 if selectedBackend == .aliyun {
-                    Button("本地筛图实验（阿里声音）") { showLocalScreenLab = true }
+                    Button(localScreen.localReminders ? "本地主动提醒已启用" : "本地主动提醒（阿里声音）") {
+                        localScreenStarting = true
+                        localScreenStatus = "正在准备本地主动提醒。"
+                        Task {
+                            defer { localScreenStarting = false }
+                            do {
+                                try await localScreen.enableReminders()
+                                localScreenStatus = "已启用，可以直接说提醒条件。"
+                                openAssistant(.unified)
+                            } catch { localScreenStatus = error.localizedDescription }
+                        }
+                    }
+                    .disabled(localScreenStarting || localScreen.localReminders || screenSharingMode)
+                    .buttonStyle(.borderedProminent)
+                    Button("关闭本地主动提醒") {
+                        Task { await localScreen.unload(); localScreenStatus = "本地模型已卸载，后续沿用原筛图。" }
+                    }.disabled(!localScreen.localReminders || localScreenStarting)
+                    Button("本地模型管理") { showLocalScreenLab = true }
                         .buttonStyle(.bordered)
                         .padding(.bottom, 8)
+                    if !localScreenStatus.isEmpty { Text(localScreenStatus) }
                 }
             }
 

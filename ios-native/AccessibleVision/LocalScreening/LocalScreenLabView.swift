@@ -4,11 +4,41 @@ import UIKit
 
 @MainActor
 final class LocalScreenLab: ObservableObject {
+    static let shared = LocalScreenLab()
     @Published var status = "请先下载并加载模型，再填写要判断的条件。"
     @Published private(set) var busy = false
     @Published private(set) var loaded = false
+    @Published private(set) var localReminders = false
     private let engine = LocalScreenEngine()
     private var revision = 0
+
+    func enableReminders() async throws {
+        guard !busy else { throw LocalScreenError.message("本地模型正在处理上一项任务，请稍后再试。") }
+        guard LocalModelStore().ready else { throw LocalScreenError.message("模型还在传入手机，全部文件校验完成后才能开启本地主动提醒。") }
+        busy = true; defer { busy = false }
+        if !loaded {
+            status = "正在加载本地主动提醒模型。"
+            let ms = try await engine.load(directory: LocalModelStore.directory)
+            loaded = true; record(["event":"model_loaded","loadMs":ms])
+        }
+        localReminders = true
+        status = "本地主动提醒已启用。返回阿里慧眼，直接说需要提醒的条件。"
+        record(["event":"local_reminders_enabled"])
+    }
+
+    func reminder(jpeg: Data, prompt: String, task: String, capturedAt: TimeInterval, requestID: String) async throws -> LocalScreenMeasurement {
+        guard localReminders, loaded else { throw LocalScreenError.message("本地主动提醒尚未启用。") }
+        guard !busy else { throw LocalScreenError.message("本地筛图还在处理上一张画面。") }
+        busy = true; defer { busy = false }
+        let result = try await engine.screen(jpeg: jpeg, condition: task, capturedAt: capturedAt, preparedPrompt: prompt)
+        if let data = try? JSONEncoder().encode(result), var event = (try? JSONSerialization.jsonObject(with:data)) as? [String:Any] {
+            event["event"] = "reminder_screen_result"; event["requestID"] = requestID; event["task"] = task
+            record(event)
+        }
+        return result
+    }
+
+    func cancelReminder() { engine.cancel() }
 
     func load() {
         guard !busy else { return }
@@ -57,15 +87,15 @@ final class LocalScreenLab: ObservableObject {
     }
 
     func unload() async {
-        revision += 1; busy = true; loaded = false
+        revision += 1; busy = true; loaded = false; localReminders = false
         status = "正在释放本地模型。"
         await engine.unload()
         busy = false; status = "模型已卸载，文件保留。"
     }
 
     func close() {
-        revision += 1; engine.cancel()
-        Task { await engine.unload() }
+        if localReminders { return }
+        Task { await unload() }
     }
 
     private func record(_ event: [String: Any]) {
@@ -91,7 +121,7 @@ final class LocalScreenLab: ObservableObject {
 struct LocalScreenLabView: View {
     @ObservedObject var camera: NativeCameraService
     @StateObject private var store = LocalModelStore()
-    @StateObject private var lab = LocalScreenLab()
+    @StateObject private var lab = LocalScreenLab.shared
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @State private var condition = ""
@@ -105,7 +135,7 @@ struct LocalScreenLabView: View {
         NavigationStack {
             Form {
                 Section {
-                    Text("35B本地筛图实验。结果用于测试，暂不触发主动提醒。先在阿里入口开启实时慧眼，再筛当前画面；也可以只选照片测试。本地筛图单独计时，不等待语音。")
+                    Text("本地模型管理。主动提醒请使用阿里慧眼上方的本地主动提醒按钮，照常说提醒条件。本页也可选照片检查模型。本地筛图单独计时，不等待语音。")
                     Text(store.status)
                     Button("下载或继续下载模型") { store.download() }
                         .disabled(store.busy || store.ready || lab.busy)

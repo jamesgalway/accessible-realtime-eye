@@ -46,7 +46,7 @@ final class LocalScreenEngine: @unchecked Sendable {
                     if let context { mb_mtmd_free(context); self.context = nil }
                     let started = ProcessInfo.processInfo.systemUptime
                     var params = mb_mtmd_params_default()
-                    params.n_predict = 12; params.n_ctx = 2048; params.n_ubatch = 512
+                    params.n_predict = 160; params.n_ctx = 4096; params.n_ubatch = 512
                     params.temperature = 0; params.image_max_slice_nums = 1
                     params.moe_slot_bank = 256
                     params.moe_lookahead_prefetch_depth = 8
@@ -77,7 +77,7 @@ final class LocalScreenEngine: @unchecked Sendable {
         }
     }
 
-    func screen(jpeg: Data, condition: String, capturedAt: TimeInterval) async throws -> LocalScreenMeasurement {
+    func screen(jpeg: Data, condition: String, capturedAt: TimeInterval, preparedPrompt: String? = nil) async throws -> LocalScreenMeasurement {
         let token = nextRevision()
         return try await withCheckedThrowingContinuation { continuation in
             queue.async { [self] in
@@ -96,12 +96,12 @@ final class LocalScreenEngine: @unchecked Sendable {
                     // Include expert prewarm in wall-clock latency; do not hide it
                     // between image selection and the timed generation step.
                     guard mb_mtmd_prewarm_after_image(context) == 0 else { throw LocalScreenError.message("专家预读失败。") }
-                    let prompt = "只根据当前图片判断条件：\(condition)\n清晰满足输出HIT；清晰未满足输出NO_HIT；看不清或证据不足输出UNCERTAIN。只输出一个英文标记，不解释，不推断先前画面。"
+                    let prompt = preparedPrompt ?? "只根据当前图片判断条件：\(condition)\n清晰满足输出HIT；清晰未满足输出NO_HIT；看不清或证据不足输出UNCERTAIN。只输出一个英文标记，不解释，不推断先前画面。"
                     guard prompt.withCString({ text in "user".withCString { mb_mtmd_prefill_text(context, text, $0) } }) == 0 else {
                         throw LocalScreenError.message(String(cString: mb_mtmd_get_last_error(context)))
                     }
                     var raw = "", firstToken = 0.0
-                    for _ in 0..<12 {
+                    for _ in 0..<(preparedPrompt == nil ? 12 : 160) {
                         guard current(token) else { throw CancellationError() }
                         let output = mb_mtmd_loop(context)
                         if let text = output.token {
@@ -109,7 +109,7 @@ final class LocalScreenEngine: @unchecked Sendable {
                             raw += String(cString: text); mb_mtmd_string_free(text)
                         }
                         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if output.is_end || ["HIT", "NO_HIT", "UNCERTAIN"].contains(trimmed) { break }
+                        if output.is_end || (preparedPrompt == nil && ["HIT", "NO_HIT", "UNCERTAIN"].contains(trimmed)) { break }
                     }
                     guard current(token) else { throw CancellationError() }
                     let total = (ProcessInfo.processInfo.systemUptime - capturedAt) * 1000
