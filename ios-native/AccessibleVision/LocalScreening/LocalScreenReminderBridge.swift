@@ -104,10 +104,11 @@ final class LocalScreenReminderBridge {
         const controller = new AbortController();
         const abort = () => { controller.abort(); post({type:'cancel',id}); };
         const externalSignal = init.signal;
+        const owns = () => enabled && appState.geminiReminder === reminder && (reminder.activeTaskSeq || 0) === taskSeq
+          && reminder.isReady !== false && !(typeof document !== 'undefined' && document.hidden);
         const timer = setTimeout(abort, 20000);
         const ownerWatch = setInterval(() => {
-          if (!enabled || appState.geminiReminder !== reminder || (reminder.activeTaskSeq || 0) !== taskSeq
-              || reminder.isReady === false || (typeof document !== 'undefined' && document.hidden)) abort();
+          if (!owns()) abort();
         },200);
         externalSignal?.addEventListener('abort', abort, {once:true});
         if (externalSignal?.aborted) abort();
@@ -117,7 +118,14 @@ final class LocalScreenReminderBridge {
           return response.json();
         };
         try {
-          const prompt = '模式：' + (body.promptMode || 'baseline') + '\n当前合同：' + body.task;
+          // Mechanical projection of the existing accepted contract, never a new
+          // contract or a keyword-based decision about the user's intent.
+          const fields = String(body.task || '').match(/category=(target_presence|state_tracking)[；;]mode=(appear|result_reached|state_changed)[；;]lifecycle=([^；;]+)[；;]target=([^；;]+)[；;]condition=([^；;]+)[；;]/);
+          const prompt = fields
+            ? '主体：' + fields[4] + '\n' + (fields[2] === 'state_changed'
+              ? '核验可观察性：当前图能可靠观察以下状态维度：' + fields[5]
+              : '核验条件：' + fields[5])
+            : '核验条件：' + body.task;
           if (controller.signal.aborted) throw new Error('本地筛图超过20秒或已经取消');
           const nativeResult = await new Promise((resolve,reject) => {
             const onAbort = () => { pending.delete(id); reject(new Error('本地筛图超过20秒或已经取消')); };
@@ -126,12 +134,20 @@ final class LocalScreenReminderBridge {
               reject:error => { controller.signal.removeEventListener('abort',onAbort); reject(error); }});
             post({type:'screen',id,imageDataUrl:body.imageDataUrl,task:body.task,prompt,elapsedMs:performance.now()-start});
           });
-          if (!nativeResult.withinBudget || controller.signal.aborted) throw new Error('本地筛图超过20秒或已经取消');
-          const result = await jsonPost('/api/active-reminder-direct-finalize', {...body,modelText:nativeResult.modelText,
-            modelLatencyMs:nativeResult.modelLatencyMs,modelProvider:'local-minicpm35b'});
-          if (controller.signal.aborted) throw new Error('本地筛图结果已过期');
+          if (!nativeResult.withinBudget || controller.signal.aborted || !owns()) throw new Error('本地筛图超过20秒或已经取消');
+          const decision = String(nativeResult.modelText || '').trim();
+          if (!['Y','N'].includes(decision)) throw new Error('本地筛图未返回有效的是或否');
+          const descriptionStart = performance.now();
+          // Only a positive screen invokes Ali. The original server compiler,
+          // state/instance parser and application delivery lifecycle stay intact.
+          const result = decision === 'Y'
+            ? await jsonPost('/api/active-reminder-local-describe', {...body,localDecision:'Y',localScreenLatencyMs:nativeResult.modelLatencyMs})
+            : await jsonPost('/api/active-reminder-direct-finalize', {...body,modelText:'N',
+              modelLatencyMs:nativeResult.modelLatencyMs,modelProvider:'local-minicpm35b'});
+          if (controller.signal.aborted || !owns()) throw new Error('本地筛图结果已过期');
           log('local_screening.result',{frameCount:body.frameCount,task:body.task,latencyMs:performance.now()-start,
-            budgetMs:20000,promptChars:prompt.length,systemPrefixReused:true,
+            budgetMs:20000,promptChars:prompt.length,systemPrefixReused:true,localDecision:decision,
+            localScreenLatencyMs:nativeResult.modelLatencyMs,descriptionLatencyMs:decision === 'Y' ? performance.now()-descriptionStart : 0,
             model:'MiniCPM-V-4.7-35B-A3B',shouldAlert:result.shouldAlert,state:result.state,transport:result.transport});
           return new Response(JSON.stringify(result),{status:200,headers:{'Content-Type':'application/json'}});
         } catch (error) {

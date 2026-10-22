@@ -22,7 +22,7 @@ function create({ backend = 'aliyun', section = 'assistant', transport = 'aliyun
   return {context,posts,http,timers,intervals,delays,events};
 }
 const tick = () => new Promise(resolve=>setImmediate(resolve));
-const body = {task:'category=target_presence;lifecycle=once;target=user-authorized-condition',imageDataUrl:'data:image/jpeg;base64,AA==',promptMode:'deep_multitask',frameCount:1};
+const body = {task:'category=target_presence;mode=appear;lifecycle=once;target=authorized-subject;condition=authorized-condition;speakText=authorized-result',imageDataUrl:'data:image/jpeg;base64,AA==',promptMode:'deep_multitask',frameCount:1};
 const options = () => ({method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
 (async()=>{
   for (const config of [{backend:'greenCloud'},{section:'teaching'}]) {
@@ -34,11 +34,25 @@ const options = () => ({method:'POST',headers:{'Content-Type':'application/json'
   const hit=create();hit.context.__huiyanSetLocalScreenEnabled(true);
   const pending=hit.context.fetch('/api/active-reminder-check',options());await tick();
   const message=hit.posts.find(x=>x.type==='screen');assert.ok(message);assert.equal(message.task,body.task);
-  assert.equal(message.prompt,'模式：deep_multitask\n当前合同：'+body.task);assert.equal(hit.http.length,0);assert.equal(hit.delays[0],20000);
-  hit.context.__huiyanLocalScreenReply({id:message.id,modelText:'{"state":"HIT"}',modelLatencyMs:2100,withinBudget:true});
+  assert.equal(message.prompt,'主体：authorized-subject\n核验条件：authorized-condition');assert.equal(hit.http.length,0);assert.equal(hit.delays[0],20000);
+  hit.context.__huiyanLocalScreenReply({id:message.id,modelText:'Y',modelLatencyMs:2100,withinBudget:true});
   const result=await (await pending).json();assert.equal(result.shouldAlert,true);
-  assert.deepEqual(hit.http.map(x=>x.path),['/api/active-reminder-direct-finalize']);
-  assert.equal(hit.http[0].body.modelProvider,'local-minicpm35b');assert.equal(hit.http[0].body.task,body.task);assert.equal(hit.intervals.size,0);
+  assert.deepEqual(hit.http.map(x=>x.path),['/api/active-reminder-local-describe']);
+  assert.equal(hit.http[0].body.localDecision,'Y');assert.equal(hit.http[0].body.task,body.task);
+  assert.equal(hit.http[0].body.imageDataUrl,body.imageDataUrl);assert.equal(hit.intervals.size,0);
+  const miss=create();miss.context.__huiyanSetLocalScreenEnabled(true);
+  const no=miss.context.fetch('/api/active-reminder-check',options());await tick();
+  miss.context.__huiyanLocalScreenReply({id:miss.posts.find(x=>x.type==='screen').id,modelText:'N',withinBudget:true});await no;
+  assert.deepEqual(miss.http.map(x=>x.path),['/api/active-reminder-direct-finalize']);assert.equal(miss.http[0].body.modelText,'N');
+  for(const [category,mode,lifecycle] of [['target_presence','appear','distinct_occurrences'],['state_tracking','result_reached','once'],['state_tracking','state_changed','continuous_changes']]){
+    const rule=create();rule.context.__huiyanSetLocalScreenEnabled(true);
+    const task=`category=${category};mode=${mode};lifecycle=${lifecycle};target=subject;condition=complete-condition;speakText=result`;
+    const response=rule.context.fetch('/api/active-reminder-check',{...options(),body:JSON.stringify({...body,task})});await tick();
+    const posted=rule.posts.find(x=>x.type==='screen');assert.ok(posted.prompt.includes('complete-condition'));
+    assert.equal(posted.prompt.includes('核验可观察性'),mode==='state_changed');
+    rule.context.__huiyanLocalScreenReply({id:posted.id,modelText:'Y',withinBudget:true});await response;
+    assert.equal(rule.http[0].path,'/api/active-reminder-local-describe');assert.equal(rule.http[0].body.task,task);
+  }
   const late=create();late.context.__huiyanSetLocalScreenEnabled(true);
   const slow=late.context.fetch('/api/active-reminder-check',options());const rejected=assert.rejects(slow,/20/);await tick();
   const old=late.posts.find(x=>x.type==='screen');[...late.timers.values()][0]();await rejected;
@@ -52,5 +66,9 @@ const options = () => ({method:'POST',headers:{'Content-Type':'application/json'
   const change=changed.context.fetch('/api/active-reminder-check',options());const changeRejected=assert.rejects(change,/取消/);await tick();
   changed.context.appState.geminiReminder.activeTaskSeq=2;[...changed.intervals.values()][0]();await changeRejected;
   assert.equal(changed.http.length,0);assert.ok(changed.posts.some(x=>x.type==='cancel'));
-  console.log('Local reminder bridge: Ali-only 20s experiment, task-only prompt, shared finalizer, stale/cancel isolation and unchanged disabled/cloud routes passed.');
+  const invalid=create();invalid.context.__huiyanSetLocalScreenEnabled(true);
+  const bad=invalid.context.fetch('/api/active-reminder-check',options());const invalidCheck=assert.rejects(bad,/是或否/);await tick();
+  invalid.context.__huiyanLocalScreenReply({id:invalid.posts.find(x=>x.type==='screen').id,modelText:'description',withinBudget:true});await invalidCheck;
+  assert.equal(invalid.http.length,0);
+  console.log('Local reminder bridge: four contract types, Y calls Ali on same frame, N has no model call, invalid/stale/cancel isolation and unchanged disabled/cloud routes passed.');
 })().catch(error=>{console.error(error);process.exitCode=1;});
