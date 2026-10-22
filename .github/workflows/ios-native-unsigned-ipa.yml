@@ -133,7 +133,10 @@ jobs:
             exit "$status"
           fi
 
-      - name: Package unsigned IPA
+      - name: Embed increased-memory request for private re-signing
+        run: bash .github/scripts/sign-local-memory-request.sh
+
+      - name: Package private re-signing IPA
         working-directory: ios-native
         run: |
           set -euo pipefail
