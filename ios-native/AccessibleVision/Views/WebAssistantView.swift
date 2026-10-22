@@ -134,7 +134,7 @@ struct WebAssistantView: View {
                     }
                     .disabled(localScreenStarting || localScreen.localReminders || screenSharingMode)
                     .buttonStyle(.borderedProminent)
-                    Button(localScreen.localReminders && localScreen.profile == .dense1b ? "1B本地主动提醒已启用" : "1B本地主动提醒（阿里声音）") {
+                    Button(localScreen.localReminders && localScreen.profile == .dense1b && localScreen.reminderVoice == .aliyun ? "1B本地主动提醒已启用" : "1B本地主动提醒（阿里声音）") {
                         localScreenStarting = true
                         localScreenStatus = "正在准备1B本地主动提醒。"
                         Task {
@@ -143,6 +143,20 @@ struct WebAssistantView: View {
                                 try await localScreen.enableReminders(profile:.dense1b)
                                 localScreenStatus = "1B实验已启用，可以说提醒条件。"
                                 openAssistant(.unified)
+                            } catch { localScreenStatus = error.localizedDescription }
+                        }
+                    }
+                    .disabled(localScreenStarting || localScreen.localReminders || screenSharingMode)
+                    .buttonStyle(.borderedProminent)
+                    Button(localScreen.localReminders && localScreen.profile == .dense1b && localScreen.reminderVoice == .google ? "1B谷歌直连声音已启用" : "1B本地主动提醒（谷歌直连声音）") {
+                        localScreenStarting = true
+                        localScreenStatus = "正在准备1B谷歌直连声音实验。"
+                        Task {
+                            defer { localScreenStarting = false }
+                            do {
+                                try await localScreen.enableReminders(profile:.dense1b, voice:.google)
+                                localScreenStatus = "1B实验已启用，谷歌声音使用手机直连。"
+                                openAssistant(.googleVoice)
                             } catch { localScreenStatus = error.localizedDescription }
                         }
                     }

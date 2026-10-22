@@ -2,6 +2,8 @@ import PhotosUI
 import SwiftUI
 import UIKit
 
+enum LocalReminderVoice: String { case aliyun, google }
+
 @MainActor
 final class LocalScreenLab: ObservableObject {
     static let shared = LocalScreenLab()
@@ -10,6 +12,7 @@ final class LocalScreenLab: ObservableObject {
     @Published private(set) var loaded = false
     @Published private(set) var localReminders = false
     @Published private(set) var profile = LocalScreenProfile.moe35b
+    @Published private(set) var reminderVoice = LocalReminderVoice.aliyun
     private let engine = LocalScreenEngine()
     private var revision = 0
     private var applicationActive = true
@@ -26,7 +29,7 @@ final class LocalScreenLab: ObservableObject {
         record(["event":"local_memory_warning_encoder_released"])
     }
 
-    func enableReminders(profile selected: LocalScreenProfile = .moe35b) async throws {
+    func enableReminders(profile selected: LocalScreenProfile = .moe35b, voice: LocalReminderVoice = .aliyun) async throws {
         guard applicationActive else { throw LocalScreenError.message("请回到慧眼前台后再加载。") }
         guard !busy else { throw LocalScreenError.message("本地模型正在处理上一项任务，请稍后再试。") }
         guard LocalModelStore.ready(profile:selected) else { throw LocalScreenError.message("\(selected.shortName)模型文件尚未全部校验完成，请稍后再开启。") }
@@ -44,9 +47,10 @@ final class LocalScreenLab: ObservableObject {
                 throw error
             }
         }
+        reminderVoice = voice
         localReminders = true
         status = "\(profile.shortName)本地主动提醒实验已启用。返回阿里慧眼说提醒条件，筛图期间请保留应用在前台。三秒总延迟仍需实测。"
-        record(["event":"local_reminders_enabled"])
+        record(["event":"local_reminders_enabled","voice":voice.rawValue,"liveTransport":voice == .google ? "browser-direct" : "aliyun-realtime"])
     }
 
     func reminder(jpeg: Data, prompt: String, task: String, capturedAt: TimeInterval, requestID: String) async throws -> LocalScreenMeasurement {

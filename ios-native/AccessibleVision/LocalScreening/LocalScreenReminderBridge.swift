@@ -15,13 +15,13 @@ final class LocalScreenReminderBridge {
     func attach(_ view: WKWebView) {
         guard webView !== view else { return }
         webView = view
-        subscription = LocalScreenLab.shared.$localReminders.sink { [weak self] enabled in
-            self?.publish(enabled)
+        subscription = Publishers.CombineLatest(LocalScreenLab.shared.$localReminders, LocalScreenLab.shared.$reminderVoice).sink { [weak self] enabled, voice in
+            self?.publish(enabled, voice:voice)
         }
     }
 
-    private func publish(_ enabled: Bool) {
-        webView?.evaluateJavaScript("window.__huiyanSetLocalScreenEnabled?.(\(enabled ? "true" : "false"));")
+    private func publish(_ enabled: Bool, voice: LocalReminderVoice) {
+        webView?.evaluateJavaScript("window.__huiyanSetLocalScreenEnabled?.(\(enabled ? "true" : "false"), '\(voice.rawValue)');")
     }
 
     func cancel() {
@@ -42,7 +42,7 @@ final class LocalScreenReminderBridge {
               ["/", "/index.html"].contains(view.url?.path ?? ""),
               let body = message.body as? [String:Any] else { return }
         let type = body["type"] as? String ?? ""
-        if type == "state" { publish(LocalScreenLab.shared.localReminders); return }
+        if type == "state" { publish(LocalScreenLab.shared.localReminders, voice:LocalScreenLab.shared.reminderVoice); return }
         if type == "cancel" {
             if let id = body["id"] as? String, requests.remove(id) != nil { LocalScreenLab.shared.cancelReminder() }
             return
@@ -81,7 +81,11 @@ final class LocalScreenReminderBridge {
       const originalFetch = window.fetch.bind(window);
       const pending = new Map();
       let enabled = false;
-      window.__huiyanSetLocalScreenEnabled = value => { enabled = value === true; };
+      let selectedVoice = 'aliyun';
+      window.__huiyanSetLocalScreenEnabled = (value, voice = 'aliyun') => {
+        enabled = value === true;
+        selectedVoice = voice === 'google' ? 'google' : 'aliyun';
+      };
       window.__huiyanLocalScreenReply = reply => {
         const entry = pending.get(reply.id);
         if (!entry) return;
@@ -94,18 +98,30 @@ final class LocalScreenReminderBridge {
       };
       window.fetch = async (input, init = {}) => {
         const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url, location.href);
+        if (enabled && selectedVoice === 'google' && url.origin === location.origin && url.pathname === '/api/gemini-browser-config') {
+          const response = await originalFetch(input, init);
+          if (response.ok) {
+            const config = await response.clone().json();
+            if (config.transport !== 'browser-direct') throw new Error('1B谷歌声音实验需要手机直连，请检查原生权限和直连配置。');
+            log('local_screening.google_direct_config',{transport:config.transport,model:config.model,voice:config.voice});
+          }
+          return response;
+        }
         if (!enabled || url.origin !== location.origin || url.pathname !== '/api/active-reminder-check'
             || String(init.method || 'GET').toUpperCase() !== 'POST' || typeof init.body !== 'string') return originalFetch(input, init);
-        if (typeof appState === 'undefined' || appState.geminiReminder?.transport !== 'aliyun-realtime') return originalFetch(input, init);
+        const expectedTransport = selectedVoice === 'google' ? 'browser-direct' : 'aliyun-realtime';
+        if (typeof appState === 'undefined' || appState.geminiReminder?.transport !== expectedTransport) return originalFetch(input, init);
         const body = JSON.parse(init.body);
         const reminder = appState.geminiReminder;
         const taskSeq = reminder.activeTaskSeq || 0;
+        const voice = selectedVoice;
         const start = performance.now();
         const id = 'local-' + Date.now() + '-' + Math.random().toString(16).slice(2);
         const controller = new AbortController();
         const abort = () => { controller.abort(); post({type:'cancel',id}); };
         const externalSignal = init.signal;
-        const owns = () => enabled && appState.geminiReminder === reminder && (reminder.activeTaskSeq || 0) === taskSeq
+        const owns = () => enabled && selectedVoice === voice && reminder.transport === expectedTransport
+          && appState.geminiReminder === reminder && (reminder.activeTaskSeq || 0) === taskSeq
           && reminder.isReady !== false && !(typeof document !== 'undefined' && document.hidden);
         const timer = setTimeout(abort, 20000);
         const ownerWatch = setInterval(() => {
@@ -117,6 +133,33 @@ final class LocalScreenReminderBridge {
           const response = await originalFetch(path, {...init, body:JSON.stringify(payload), signal:controller.signal});
           if (!response.ok) throw new Error((await response.json()).error || '本地筛图资料处理失败');
           return response.json();
+        };
+        const googleReview = async localMs => {
+          if (!reminder.browserGeminiAi?.models || !owns() || controller.signal.aborted) throw new Error('谷歌手机直连尚未就绪或任务已更换。');
+          const modelProvider = 'local-minicpm1b-google';
+          const prepared = await jsonPost('/api/active-reminder-direct-prepare', {...body,modelProvider});
+          if (!owns() || controller.signal.aborted) throw new Error('谷歌复核任务已过期。');
+          const image = typeof parseImageDataUrlForClient === 'function' ? parseImageDataUrlForClient(body.imageDataUrl) : null;
+          if (!image || !prepared.model || !prepared.prompt) throw new Error('谷歌直连复核资料不完整。');
+          const pool = reminder.browserActiveReminderAiPool?.length ? reminder.browserActiveReminderAiPool : [reminder.browserGeminiAi];
+          const slot = (Math.max(1,Number(body.requestSeq || body.frameCount || 1))-1) % pool.length;
+          const googleController = new AbortController();
+          const cancelGoogle = () => googleController.abort();
+          controller.signal.addEventListener('abort',cancelGoogle,{once:true});
+          const reviewTimer = setTimeout(cancelGoogle,Math.max(1000,Math.min(15000,Number(prepared.timeoutMs || reminder.browserImageRequestTimeoutMs || 3500))));
+          const reviewStart = performance.now();
+          let response;
+          try {
+            response = await pool[slot].models.generateContent({model:prepared.model,
+              contents:[{role:'user',parts:[{text:prepared.prompt},{inlineData:image}]}],
+              config:{temperature:0,maxOutputTokens:Number(prepared.maxOutputTokens || 160),thinkingConfig:{thinkingBudget:0},
+                ...(prepared.jsonMode ? {responseMimeType:'application/json'} : {}),abortSignal:googleController.signal}});
+          } finally { clearTimeout(reviewTimer); controller.signal.removeEventListener('abort',cancelGoogle); }
+          if (!owns() || controller.signal.aborted || googleController.signal.aborted) throw new Error('谷歌直连复核已超时或过期。');
+          const modelText = String(response?.text || '').trim();
+          if (!modelText) throw new Error('谷歌直连未返回有效复核结果。');
+          return jsonPost('/api/active-reminder-direct-finalize',{...body,modelProvider,modelText,
+            modelLatencyMs:localMs+performance.now()-reviewStart,browserKeySlot:slot+1});
         };
         try {
           // Mechanical projection of the existing accepted contract, never a new
@@ -140,17 +183,19 @@ final class LocalScreenReminderBridge {
           if (!['Y','N'].includes(decision)) throw new Error('本地筛图未返回有效的是或否');
           const localModel = nativeResult.model === 'MiniCPM-V-4.7-1B' ? nativeResult.model : 'MiniCPM-V-4.7-35B-A3B';
           const descriptionStart = performance.now();
-          // Only a positive screen invokes Ali. The original server compiler,
+          // Only a positive screen invokes the selected provider. The original server compiler,
           // state/instance parser and application delivery lifecycle stay intact.
           const result = decision === 'Y'
-            ? await jsonPost('/api/active-reminder-local-describe', {...body,localDecision:'Y',localScreenLatencyMs:nativeResult.modelLatencyMs,localScreenModel:localModel})
+            ? voice === 'google'
+              ? await googleReview(nativeResult.modelLatencyMs)
+              : await jsonPost('/api/active-reminder-local-describe', {...body,localDecision:'Y',localScreenLatencyMs:nativeResult.modelLatencyMs,localScreenModel:localModel})
             : await jsonPost('/api/active-reminder-direct-finalize', {...body,modelText:'N',
               modelLatencyMs:nativeResult.modelLatencyMs,modelProvider:localModel === 'MiniCPM-V-4.7-1B' ? 'local-minicpm1b' : 'local-minicpm35b'});
           if (controller.signal.aborted || !owns()) throw new Error('本地筛图结果已过期');
           log('local_screening.result',{frameCount:body.frameCount,task:body.task,latencyMs:performance.now()-start,
             budgetMs:20000,promptChars:prompt.length,systemPrefixReused:true,localDecision:decision,
             localScreenLatencyMs:nativeResult.modelLatencyMs,descriptionLatencyMs:decision === 'Y' ? performance.now()-descriptionStart : 0,
-            model:localModel,shouldAlert:result.shouldAlert,state:result.state,transport:result.transport});
+            model:localModel,voice,liveTransport:reminder.transport,shouldAlert:result.shouldAlert,state:result.state,transport:result.transport});
           return new Response(JSON.stringify(result),{status:200,headers:{'Content-Type':'application/json'}});
         } catch (error) {
           log('local_screening.failed',{frameCount:body.frameCount,task:body.task,error:String(error.message || error),latencyMs:performance.now()-start});

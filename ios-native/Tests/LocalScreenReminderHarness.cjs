@@ -3,23 +3,25 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync('ios-native/AccessibleVision/LocalScreening/LocalScreenReminderBridge.swift', 'utf8').split('static let script = #"""')[1].split('"""#')[0];
-function create({ backend = 'aliyun', section = 'assistant', transport = 'aliyun-realtime' } = {}) {
-  const posts = [], http = [], timers = new Map(), intervals = new Map(), delays=[], events = [];
+function create({ backend = 'aliyun', section = 'assistant', transport = 'aliyun-realtime',configTransport='browser-direct',modelReply } = {}) {
+  const posts = [], http = [], timers = new Map(), intervals = new Map(), delays=[], events = [], modelCalls=[];
   const context = { URL, Response, AbortController, performance, console, appState:{geminiReminder:{transport}},
     location:{href:'https://example.test/',origin:'https://example.test',pathname:'/'},
-    logClientEvent:(...args)=>events.push(args),
+    logClientEvent:(...args)=>events.push(args),parseImageDataUrlForClient:value=>({mimeType:'image/jpeg',data:value.split(',')[1]}),
     setTimeout:(fn,ms)=>{const id=timers.size+1;timers.set(id,fn);delays.push(ms);return id;},clearTimeout:id=>timers.delete(id),
     setInterval:fn=>{const id=intervals.size+1;intervals.set(id,fn);return id;},clearInterval:id=>intervals.delete(id) };
   context.window = context;
   context.__ACCESSIBLE_VISION_BACKEND__ = backend; context.__ACCESSIBLE_VISION_SECTION__ = section;
   context.webkit = {messageHandlers:{nativeLocalScreen:{postMessage:m=>posts.push(m)}}};
+  context.appState.geminiReminder.browserGeminiAi={models:{generateContent:async args=>{modelCalls.push(args);return modelReply ? modelReply(args) : {text:'{"state":"HIT","speakable":true,"observation":"visible result"}'};}}};
   context.fetch = async (path, init={}) => {
     http.push({path:String(path),body:init.body && JSON.parse(init.body)});
-    return new Response(JSON.stringify(String(path).endsWith('-prepare')?{prompt:'original contract prompt'}:
+    if(String(path).includes('/api/gemini-browser-config')) return new Response(JSON.stringify({transport:configTransport,model:'google-live',voice:'existing-voice',apiKey:'private-test-only'}));
+    return new Response(JSON.stringify(String(path).endsWith('-prepare')?{prompt:'original contract prompt',model:'google-review',jsonMode:true,timeoutMs:3500,maxOutputTokens:160}:
       {ok:true,shouldAlert:true,state:'HIT',provider:'local-minicpm35b',transport:'native-local-minicpm35b'}),{status:200});
   };
   vm.runInNewContext(source, context);
-  return {context,posts,http,timers,intervals,delays,events};
+  return {context,posts,http,timers,intervals,delays,events,modelCalls};
 }
 const tick = () => new Promise(resolve=>setImmediate(resolve));
 const body = {task:'category=target_presence;mode=appear;lifecycle=once;target=authorized-subject;condition=authorized-condition;speakText=authorized-result',imageDataUrl:'data:image/jpeg;base64,AA==',promptMode:'deep_multitask',frameCount:1};
@@ -86,5 +88,32 @@ const options = () => ({method:'POST',headers:{'Content-Type':'application/json'
   const bad=invalid.context.fetch('/api/active-reminder-check',options());const invalidCheck=assert.rejects(bad,/是或否/);await tick();
   invalid.context.__huiyanLocalScreenReply({id:invalid.posts.find(x=>x.type==='screen').id,modelText:'description',withinBudget:true});await invalidCheck;
   assert.equal(invalid.http.length,0);
-  console.log('Local reminder bridge: four contract types, Y calls Ali on same frame, N has no model call, invalid/stale/cancel isolation and unchanged disabled/cloud routes passed.');
+  for(const decision of ['Y','N']) {
+    const g=create({transport:'browser-direct'});g.context.__huiyanSetLocalScreenEnabled(true,'google');
+    await g.context.fetch('/api/gemini-browser-config');
+    assert.equal(g.events[0][1].transport,'browser-direct');assert.equal(JSON.stringify(g.events).includes('private-test-only'),false);
+    g.http.length=0;
+    const p=g.context.fetch('/api/active-reminder-check',options());await tick();
+    g.context.__huiyanLocalScreenReply({id:g.posts.find(x=>x.type==='screen').id,model:'MiniCPM-V-4.7-1B',modelText:decision,modelLatencyMs:410,withinBudget:true});await p;
+    assert.equal(g.modelCalls.length,decision==='Y'?1:0);
+    assert.ok(!g.http.some(x=>x.path==='/api/active-reminder-local-describe'||x.path==='/api/active-reminder-check'));
+    if(decision==='Y') {
+      assert.deepEqual(g.http.map(x=>x.path),['/api/active-reminder-direct-prepare','/api/active-reminder-direct-finalize']);
+      assert.equal(g.http[0].body.modelProvider,'local-minicpm1b-google');assert.equal(g.http[1].body.modelProvider,'local-minicpm1b-google');
+      assert.equal(g.modelCalls[0].model,'google-review');assert.equal(g.modelCalls[0].contents[0].parts[0].text,'original contract prompt');
+      assert.equal(g.modelCalls[0].contents[0].parts[1].inlineData.data,'AA==');assert.ok(g.delays.includes(3500));
+    }
+    const event=g.events.find(x=>x[0]==='local_screening.result')[1];assert.equal(event.voice,'google');assert.equal(event.liveTransport,'browser-direct');
+  }
+  const proxy=create({transport:'server-proxy',configTransport:'server-proxy'});proxy.context.__huiyanSetLocalScreenEnabled(true,'google');
+  await assert.rejects(proxy.context.fetch('/api/gemini-browser-config'),/手机直连/);assert.equal(proxy.modelCalls.length,0);
+  let finishReview;
+  const staleGoogle=create({transport:'browser-direct',modelReply:()=>new Promise(resolve=>{finishReview=resolve;})});
+  staleGoogle.context.__huiyanSetLocalScreenEnabled(true,'google');
+  const oldGoogle=staleGoogle.context.fetch('/api/active-reminder-check',options());const oldRejected=assert.rejects(oldGoogle,/过期|超时/);await tick();
+  staleGoogle.context.__huiyanLocalScreenReply({id:staleGoogle.posts.find(x=>x.type==='screen').id,model:'MiniCPM-V-4.7-1B',modelText:'Y',withinBudget:true});await tick();
+  staleGoogle.context.appState.geminiReminder.activeTaskSeq=2;
+  finishReview({text:'old result'});await oldRejected;
+  assert.equal(staleGoogle.http.filter(x=>x.path.endsWith('-finalize')).length,0);
+  console.log('PASS: four original contracts, Ali unchanged, 1B Google same-frame direct review and no Ali call, N skips model, direct-only config, stale result isolation.');
 })().catch(error=>{console.error(error);process.exitCode=1;});
