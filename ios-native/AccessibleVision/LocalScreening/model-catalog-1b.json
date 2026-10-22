@@ -1,0 +1,20 @@
+{
+  "model": "MiniCPM-V 4.7 1B",
+  "source": "tc-mb/MiniCPM-V-Apps-gguf",
+  "revision": "8716e5209f308fd53f197ccd7d50c6fdcc2dc37d",
+  "files": [
+    {
+      "path": "MiniCPM-V-4_7-1B-Q4_K_M.gguf",
+      "url": "https://huggingface.co/tc-mb/MiniCPM-V-Apps-gguf/resolve/8716e5209f308fd53f197ccd7d50c6fdcc2dc37d/MiniCPM-V-4.7-1B/MiniCPM-V-4_7-1B-Q4_K_M.gguf",
+      "bytes": 672003584,
+      "sha256": "bdc2c0da2320129a4fd91b0d464c63f8047b511a7ef7f7e1d143b433c7165cd5"
+    },
+    {
+      "path": "mmproj-model-f16.gguf",
+      "url": "https://huggingface.co/tc-mb/MiniCPM-V-Apps-gguf/resolve/8716e5209f308fd53f197ccd7d50c6fdcc2dc37d/MiniCPM-V-4.7-1B/mmproj-model-f16.gguf",
+      "bytes": 1108746816,
+      "sha256": "febb329c29ec9f1643c9d690ca74d35f486b83fa48c2f54c108b135729f635fd"
+    }
+  ],
+  "totalBytes": 1780750400
+}

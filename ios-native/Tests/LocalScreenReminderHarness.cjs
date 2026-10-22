@@ -44,6 +44,22 @@ const options = () => ({method:'POST',headers:{'Content-Type':'application/json'
   const no=miss.context.fetch('/api/active-reminder-check',options());await tick();
   miss.context.__huiyanLocalScreenReply({id:miss.posts.find(x=>x.type==='screen').id,modelText:'N',withinBudget:true});await no;
   assert.deepEqual(miss.http.map(x=>x.path),['/api/active-reminder-direct-finalize']);assert.equal(miss.http[0].body.modelText,'N');
+  for (const decision of ['Y','N']) {
+    const dense=create();dense.context.__huiyanSetLocalScreenEnabled(true);
+    const response=dense.context.fetch('/api/active-reminder-check',options());await tick();
+    dense.context.__huiyanLocalScreenReply({id:dense.posts.find(x=>x.type==='screen').id,
+      modelText:decision,model:'MiniCPM-V-4.7-1B',withinBudget:true});await response;
+    assert.equal(dense.http.length,1);
+    if (decision === 'Y') {
+      assert.equal(dense.http[0].path,'/api/active-reminder-local-describe');
+      assert.equal(dense.http[0].body.localScreenModel,'MiniCPM-V-4.7-1B');
+      assert.equal(dense.http[0].body.imageDataUrl,body.imageDataUrl);
+    } else {
+      assert.equal(dense.http[0].path,'/api/active-reminder-direct-finalize');
+      assert.equal(dense.http[0].body.modelProvider,'local-minicpm1b');
+    }
+    assert.equal(dense.events.find(e=>e[0]==='local_screening.result')[1].model,'MiniCPM-V-4.7-1B');
+  }
   for(const [category,mode,lifecycle] of [['target_presence','appear','distinct_occurrences'],['state_tracking','result_reached','once'],['state_tracking','state_changed','continuous_changes']]){
     const rule=create();rule.context.__huiyanSetLocalScreenEnabled(true);
     const task=`category=${category};mode=${mode};lifecycle=${lifecycle};target=subject;condition=complete-condition;speakText=result`;

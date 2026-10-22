@@ -63,6 +63,7 @@ final class LocalScreenReminderBridge {
                 response["modelText"] = result.rawText
                 response["modelLatencyMs"] = result.totalMs
                 response["withinBudget"] = result.withinBudget
+                response["model"] = result.modelName
             } catch { response["error"] = error.localizedDescription }
             guard generation == ticket, requests.remove(id) != nil, self.webView === view,
                   UIApplication.shared.applicationState == .active else { return }
@@ -137,18 +138,19 @@ final class LocalScreenReminderBridge {
           if (!nativeResult.withinBudget || controller.signal.aborted || !owns()) throw new Error('本地筛图超过20秒或已经取消');
           const decision = String(nativeResult.modelText || '').trim();
           if (!['Y','N'].includes(decision)) throw new Error('本地筛图未返回有效的是或否');
+          const localModel = nativeResult.model === 'MiniCPM-V-4.7-1B' ? nativeResult.model : 'MiniCPM-V-4.7-35B-A3B';
           const descriptionStart = performance.now();
           // Only a positive screen invokes Ali. The original server compiler,
           // state/instance parser and application delivery lifecycle stay intact.
           const result = decision === 'Y'
-            ? await jsonPost('/api/active-reminder-local-describe', {...body,localDecision:'Y',localScreenLatencyMs:nativeResult.modelLatencyMs})
+            ? await jsonPost('/api/active-reminder-local-describe', {...body,localDecision:'Y',localScreenLatencyMs:nativeResult.modelLatencyMs,localScreenModel:localModel})
             : await jsonPost('/api/active-reminder-direct-finalize', {...body,modelText:'N',
-              modelLatencyMs:nativeResult.modelLatencyMs,modelProvider:'local-minicpm35b'});
+              modelLatencyMs:nativeResult.modelLatencyMs,modelProvider:localModel === 'MiniCPM-V-4.7-1B' ? 'local-minicpm1b' : 'local-minicpm35b'});
           if (controller.signal.aborted || !owns()) throw new Error('本地筛图结果已过期');
           log('local_screening.result',{frameCount:body.frameCount,task:body.task,latencyMs:performance.now()-start,
             budgetMs:20000,promptChars:prompt.length,systemPrefixReused:true,localDecision:decision,
             localScreenLatencyMs:nativeResult.modelLatencyMs,descriptionLatencyMs:decision === 'Y' ? performance.now()-descriptionStart : 0,
-            model:'MiniCPM-V-4.7-35B-A3B',shouldAlert:result.shouldAlert,state:result.state,transport:result.transport});
+            model:localModel,shouldAlert:result.shouldAlert,state:result.state,transport:result.transport});
           return new Response(JSON.stringify(result),{status:200,headers:{'Content-Type':'application/json'}});
         } catch (error) {
           log('local_screening.failed',{frameCount:body.frameCount,task:body.task,error:String(error.message || error),latencyMs:performance.now()-start});

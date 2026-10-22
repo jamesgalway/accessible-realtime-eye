@@ -6,7 +6,7 @@ import UIKit
 // inference here. It uses the real engine and cached reminder prompt, with no
 // web view, camera, microphone, cloud request or progress/reminder submission.
 struct LocalScreenBenchmarkView: View {
-    private struct Fixture: Decodable { let prompt: String; let samples: Int }
+    private struct Fixture: Decodable { let prompt: String; let samples: Int; let model: String? }
     @State private var status = "正在运行本地离线对照。"
     @Environment(\.scenePhase) private var phase
     private let engine = LocalScreenEngine()
@@ -23,7 +23,7 @@ struct LocalScreenBenchmarkView: View {
     @MainActor private func run() async {
         let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("LocalScreenBenchmark", isDirectory: true)
-        let output = directory.appendingPathComponent("result-io\(LocalScreenEngine.ioThreads).json")
+        var output = directory.appendingPathComponent("benchmark-error.json")
         var report: [String: Any] = ["ioThreads": LocalScreenEngine.ioThreads,
             "startedAt": ISO8601DateFormatter().string(from: Date()), "complete": false,
             "budgetMs": 20_000, "scope": "offline-native-reminder-engine"]
@@ -31,6 +31,9 @@ struct LocalScreenBenchmarkView: View {
             let fixtureData = try Data(contentsOf: directory.appendingPathComponent("fixture.json"))
             guard fixtureData.count <= 10_000 else { throw LocalScreenError.message("对照配置过大。") }
             let fixture = try JSONDecoder().decode(Fixture.self, from: fixtureData)
+            guard let profile = LocalScreenProfile(rawValue:fixture.model ?? "35b") else { throw LocalScreenError.message("对照模型无效。") }
+            output = directory.appendingPathComponent("result-\(profile == .dense1b ? "1b-" : "")io\(LocalScreenEngine.ioThreads).json")
+            report["model"] = profile.identifier
             guard !fixture.prompt.isEmpty, fixture.prompt.count <= 1200, (1...4).contains(fixture.samples) else {
                 throw LocalScreenError.message("对照配置无效。")
             }
@@ -38,7 +41,7 @@ struct LocalScreenBenchmarkView: View {
             guard jpeg.count <= 2_000_000, UIImage(data: jpeg) != nil else { throw LocalScreenError.message("对照图片无效。") }
             report["imageSHA256"] = SHA256.hash(data: jpeg).map { String(format: "%02x", $0) }.joined()
             report["promptSHA256"] = SHA256.hash(data: Data(fixture.prompt.utf8)).map { String(format: "%02x", $0) }.joined()
-            report["loadMs"] = try await engine.load(directory: LocalModelStore.directory)
+            report["loadMs"] = try await engine.load(directory: profile.directory,profile:profile)
             var samples = [[String: Any]]()
             for index in 0..<fixture.samples {
                 guard !Task.isCancelled, UIApplication.shared.applicationState == .active else { throw CancellationError() }

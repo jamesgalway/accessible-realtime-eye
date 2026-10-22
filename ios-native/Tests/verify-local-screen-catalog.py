@@ -29,4 +29,17 @@ for entry in files:
 provenance = json.loads((directory / 'upstream-provenance.json').read_text(encoding='utf-8'))
 for name, expected_hash in provenance['bridgeSha256'].items():
     assert hashlib.sha256((directory / 'Upstream' / name).read_bytes()).hexdigest() == expected_hash, name
-print('Pinned 35B catalog: 43 files, sizes, URLs, SHA256 and bridge provenance passed.')
+dense = json.loads((directory / 'model-catalog-1b.json').read_text(encoding='utf-8'))
+assert dense['revision'] == catalog['revision']
+assert {f['path']: f['bytes'] for f in dense['files']} == {
+    'MiniCPM-V-4_7-1B-Q4_K_M.gguf': 672003584, 'mmproj-model-f16.gguf': 1108746816}
+assert dense['totalBytes'] == 1780750400
+for entry in dense['files']:
+    url = urlsplit(entry['url'])
+    assert url.scheme == 'https' and url.hostname == 'huggingface.co'
+    assert '/resolve/' + dense['revision'] + '/MiniCPM-V-4.7-1B/' + entry['path'] == unquote(url.path).removeprefix('/tc-mb/MiniCPM-V-Apps-gguf')
+    assert re.fullmatch('[0-9a-f]{64}', entry['sha256'])
+dense_vision = next(entry for entry in dense['files'] if entry['path'] == 'mmproj-model-f16.gguf')
+moe_vision = next(entry for entry in files if entry['path'] == 'mmproj-model-f16.gguf')
+assert dense_vision['sha256'] != moe_vision['sha256'] and dense_vision['bytes'] != moe_vision['bytes']
+print('Pinned 35B/1B catalogs: complete paired files, sizes, URLs, SHA256 and bridge provenance passed.')

@@ -17,6 +17,17 @@ struct LocalModelCatalog: Decodable {
 
 @MainActor
 final class LocalModelStore: ObservableObject {
+    static func ready(profile: LocalScreenProfile) -> Bool {
+        guard let catalogURL = Bundle.main.url(forResource: profile.catalogName, withExtension: "json"),
+              let data = try? Data(contentsOf: catalogURL),
+              let catalog = try? JSONDecoder().decode(LocalModelCatalog.self, from: data),
+              let receiptData = try? Data(contentsOf: profile.directory.appendingPathComponent("verified-files.json")),
+              let receipt = try? JSONDecoder().decode([String:String].self, from: receiptData) else { return false }
+        return catalog.files.allSatisfy { file in
+            let attributes = try? FileManager.default.attributesOfItem(atPath: profile.directory.appendingPathComponent(file.path).path)
+            return receipt[file.path] == file.sha256 && (attributes?[.size] as? NSNumber)?.int64Value == file.bytes
+        }
+    }
     @Published private(set) var status = "35B模型尚未下载。完整文件约16.6GB，建议Wi-Fi和20GB空闲存储。"
     @Published private(set) var busy = false
     @Published private(set) var ready = false

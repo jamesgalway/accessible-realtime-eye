@@ -120,7 +120,7 @@ struct WebAssistantView: View {
                 .padding(.bottom, 8)
                 if !assistantEntries.status.isEmpty { Text(assistantEntries.status) }
                 if selectedBackend == .aliyun {
-                    Button(localScreen.localReminders ? "本地主动提醒已启用" : "本地主动提醒（阿里声音）") {
+                    Button(localScreen.localReminders && localScreen.profile == .moe35b ? "本地主动提醒已启用" : "本地主动提醒（阿里声音）") {
                         localScreenStarting = true
                         localScreenStatus = "正在准备本地主动提醒。"
                         Task {
@@ -128,6 +128,20 @@ struct WebAssistantView: View {
                             do {
                                 try await localScreen.enableReminders()
                                 localScreenStatus = "已启用，可以直接说提醒条件。"
+                                openAssistant(.unified)
+                            } catch { localScreenStatus = error.localizedDescription }
+                        }
+                    }
+                    .disabled(localScreenStarting || localScreen.localReminders || screenSharingMode)
+                    .buttonStyle(.borderedProminent)
+                    Button(localScreen.localReminders && localScreen.profile == .dense1b ? "1B本地主动提醒已启用" : "1B本地主动提醒（阿里声音）") {
+                        localScreenStarting = true
+                        localScreenStatus = "正在准备1B本地主动提醒。"
+                        Task {
+                            defer { localScreenStarting = false }
+                            do {
+                                try await localScreen.enableReminders(profile:.dense1b)
+                                localScreenStatus = "1B实验已启用，可以说提醒条件。"
                                 openAssistant(.unified)
                             } catch { localScreenStatus = error.localizedDescription }
                         }

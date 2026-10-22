@@ -9,6 +9,7 @@ final class LocalScreenLab: ObservableObject {
     @Published private(set) var busy = false
     @Published private(set) var loaded = false
     @Published private(set) var localReminders = false
+    @Published private(set) var profile = LocalScreenProfile.moe35b
     private let engine = LocalScreenEngine()
     private var revision = 0
     private var applicationActive = true
@@ -25,16 +26,18 @@ final class LocalScreenLab: ObservableObject {
         record(["event":"local_memory_warning_encoder_released"])
     }
 
-    func enableReminders() async throws {
+    func enableReminders(profile selected: LocalScreenProfile = .moe35b) async throws {
         guard applicationActive else { throw LocalScreenError.message("请回到慧眼前台后再加载。") }
         guard !busy else { throw LocalScreenError.message("本地模型正在处理上一项任务，请稍后再试。") }
-        guard LocalModelStore().ready else { throw LocalScreenError.message("模型还在传入手机，全部文件校验完成后才能开启本地主动提醒。") }
+        guard LocalModelStore.ready(profile:selected) else { throw LocalScreenError.message("\(selected.shortName)模型文件尚未全部校验完成，请稍后再开启。") }
         busy = true; defer { busy = false }
+        if loaded && profile != selected { await engine.unload(); loaded = false; localReminders = false }
+        profile = selected
         if !loaded {
             status = "正在加载本地主动提醒模型。"
             record(["event":"model_load_started","availableBytes":huiyan_local_available_memory(),"footprintBytes":huiyan_local_footprint()])
             do {
-                let ms = try await engine.load(directory: LocalModelStore.directory)
+                let ms = try await engine.load(directory: selected.directory, profile:selected)
                 loaded = true; record(["event":"model_loaded","loadMs":ms])
             } catch {
                 record(["event":"model_load_failed","error":error.localizedDescription,"availableBytes":huiyan_local_available_memory()])
@@ -42,7 +45,7 @@ final class LocalScreenLab: ObservableObject {
             }
         }
         localReminders = true
-        status = "本地主动提醒已启用，当前为20秒慢速实验。返回阿里慧眼说提醒条件，筛图期间请保留应用在前台。"
+        status = "\(profile.shortName)本地主动提醒实验已启用。返回阿里慧眼说提醒条件，筛图期间请保留应用在前台。三秒总延迟仍需实测。"
         record(["event":"local_reminders_enabled"])
     }
 
@@ -70,6 +73,7 @@ final class LocalScreenLab: ObservableObject {
     func load() {
         guard !busy else { return }
         busy = true; revision += 1
+        profile = .moe35b
         let token = revision
         status = "正在加载35B模型，请稍等。"
         Task {
@@ -128,7 +132,7 @@ final class LocalScreenLab: ObservableObject {
     private func record(_ event: [String: Any]) {
         var event = event
         event["time"] = ISO8601DateFormatter().string(from: Date())
-        event["model"] = "MiniCPM-V-4.7-35B-A3B"
+        event["model"] = profile.identifier
         let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("local-screening-diagnostics", isDirectory: true)
         do {
@@ -164,6 +168,7 @@ struct LocalScreenLabView: View {
                 Section {
                     Text("本地模型管理。主动提醒请使用阿里慧眼上方的本地主动提醒按钮，照常说提醒条件。本页也可选照片检查模型。本地筛图单独计时，不等待语音。")
                     Text(store.status)
+                    if lab.loaded { Text("当前加载：\(lab.profile.shortName)。本页管理35B文件，1B使用主页的独立实验入口。") }
                     Button("下载或继续下载模型") { store.download() }
                         .disabled(store.busy || store.ready || lab.busy)
                     Button("停止下载") { store.cancel() }.disabled(!store.busy)
