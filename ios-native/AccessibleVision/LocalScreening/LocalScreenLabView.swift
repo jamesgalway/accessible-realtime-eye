@@ -11,8 +11,16 @@ final class LocalScreenLab: ObservableObject {
     @Published private(set) var localReminders = false
     private let engine = LocalScreenEngine()
     private var revision = 0
+    private var applicationActive = true
+
+    func setApplicationActive(_ active: Bool) {
+        applicationActive = active
+        if !active { engine.cancel() }
+        if loaded || busy { record(["event":active ? "local_app_active" : "local_app_suspended"]) }
+    }
 
     func enableReminders() async throws {
+        guard applicationActive else { throw LocalScreenError.message("请回到慧眼前台后再加载。") }
         guard !busy else { throw LocalScreenError.message("本地模型正在处理上一项任务，请稍后再试。") }
         guard LocalModelStore().ready else { throw LocalScreenError.message("模型还在传入手机，全部文件校验完成后才能开启本地主动提醒。") }
         busy = true; defer { busy = false }
@@ -28,15 +36,21 @@ final class LocalScreenLab: ObservableObject {
             }
         }
         localReminders = true
-        status = "本地主动提醒已启用。返回阿里慧眼，直接说需要提醒的条件。"
+        status = "本地主动提醒已启用，当前为20秒慢速实验。返回阿里慧眼说提醒条件，筛图期间请保留应用在前台。"
         record(["event":"local_reminders_enabled"])
     }
 
     func reminder(jpeg: Data, prompt: String, task: String, capturedAt: TimeInterval, requestID: String) async throws -> LocalScreenMeasurement {
         guard localReminders, loaded else { throw LocalScreenError.message("本地主动提醒尚未启用。") }
+        guard applicationActive else { throw LocalScreenError.message("本地筛图在后台已暂停。") }
         guard !busy else { throw LocalScreenError.message("本地筛图还在处理上一张画面。") }
         busy = true; defer { busy = false }
-        let result = try await engine.screen(jpeg: jpeg, condition: task, capturedAt: capturedAt, preparedPrompt: prompt)
+        let result:LocalScreenMeasurement
+        do { result = try await engine.screen(jpeg: jpeg, condition: task, capturedAt: capturedAt, preparedPrompt: prompt,budgetMs:20_000) }
+        catch {
+            record(["event":"reminder_screen_failed","requestID":requestID,"error":error.localizedDescription])
+            throw error
+        }
         if let data = try? JSONEncoder().encode(result), var event = (try? JSONSerialization.jsonObject(with:data)) as? [String:Any] {
             event["event"] = "reminder_screen_result"; event["requestID"] = requestID; event["task"] = task
             record(event)

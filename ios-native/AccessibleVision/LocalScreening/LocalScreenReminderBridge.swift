@@ -1,5 +1,6 @@
 import Combine
 import WebKit
+import UIKit
 
 @MainActor
 final class LocalScreenReminderBridge {
@@ -63,7 +64,8 @@ final class LocalScreenReminderBridge {
                 response["modelLatencyMs"] = result.totalMs
                 response["withinBudget"] = result.withinBudget
             } catch { response["error"] = error.localizedDescription }
-            guard generation == ticket, requests.remove(id) != nil, self.webView === view else { return }
+            guard generation == ticket, requests.remove(id) != nil, self.webView === view,
+                  UIApplication.shared.applicationState == .active else { return }
             view.callAsyncJavaScript("window.__huiyanLocalScreenReply?.(reply);", arguments:["reply":response],in:nil,in:.page,completionHandler:nil)
         }
     }
@@ -95,12 +97,18 @@ final class LocalScreenReminderBridge {
             || String(init.method || 'GET').toUpperCase() !== 'POST' || typeof init.body !== 'string') return originalFetch(input, init);
         if (typeof appState === 'undefined' || appState.geminiReminder?.transport !== 'aliyun-realtime') return originalFetch(input, init);
         const body = JSON.parse(init.body);
+        const reminder = appState.geminiReminder;
+        const taskSeq = reminder.activeTaskSeq || 0;
         const start = performance.now();
         const id = 'local-' + Date.now() + '-' + Math.random().toString(16).slice(2);
         const controller = new AbortController();
         const abort = () => { controller.abort(); post({type:'cancel',id}); };
         const externalSignal = init.signal;
-        const timer = setTimeout(abort, 3500);
+        const timer = setTimeout(abort, 20000);
+        const ownerWatch = setInterval(() => {
+          if (!enabled || appState.geminiReminder !== reminder || (reminder.activeTaskSeq || 0) !== taskSeq
+              || reminder.isReady === false || (typeof document !== 'undefined' && document.hidden)) abort();
+        },200);
         externalSignal?.addEventListener('abort', abort, {once:true});
         if (externalSignal?.aborted) abort();
         const jsonPost = async (path, payload) => {
@@ -109,27 +117,28 @@ final class LocalScreenReminderBridge {
           return response.json();
         };
         try {
-          const prepared = await jsonPost('/api/active-reminder-direct-prepare', {task:body.task,frameCount:body.frameCount,promptMode:body.promptMode});
-          if (controller.signal.aborted) throw new Error('本地筛图超过3.5秒或已经取消');
+          const prompt = '模式：' + (body.promptMode || 'baseline') + '\n当前合同：' + body.task;
+          if (controller.signal.aborted) throw new Error('本地筛图超过20秒或已经取消');
           const nativeResult = await new Promise((resolve,reject) => {
-            const onAbort = () => { pending.delete(id); reject(new Error('本地筛图超过3.5秒或已经取消')); };
+            const onAbort = () => { pending.delete(id); reject(new Error('本地筛图超过20秒或已经取消')); };
             controller.signal.addEventListener('abort',onAbort,{once:true});
             pending.set(id,{resolve:value => { controller.signal.removeEventListener('abort',onAbort); resolve(value); },
               reject:error => { controller.signal.removeEventListener('abort',onAbort); reject(error); }});
-            post({type:'screen',id,imageDataUrl:body.imageDataUrl,task:body.task,prompt:prepared.prompt,elapsedMs:performance.now()-start});
+            post({type:'screen',id,imageDataUrl:body.imageDataUrl,task:body.task,prompt,elapsedMs:performance.now()-start});
           });
-          if (!nativeResult.withinBudget || controller.signal.aborted) throw new Error('本地筛图超过3.5秒或已经取消');
+          if (!nativeResult.withinBudget || controller.signal.aborted) throw new Error('本地筛图超过20秒或已经取消');
           const result = await jsonPost('/api/active-reminder-direct-finalize', {...body,modelText:nativeResult.modelText,
             modelLatencyMs:nativeResult.modelLatencyMs,modelProvider:'local-minicpm35b'});
           if (controller.signal.aborted) throw new Error('本地筛图结果已过期');
           log('local_screening.result',{frameCount:body.frameCount,task:body.task,latencyMs:performance.now()-start,
+            budgetMs:20000,promptChars:prompt.length,systemPrefixReused:true,
             model:'MiniCPM-V-4.7-35B-A3B',shouldAlert:result.shouldAlert,state:result.state,transport:result.transport});
           return new Response(JSON.stringify(result),{status:200,headers:{'Content-Type':'application/json'}});
         } catch (error) {
           log('local_screening.failed',{frameCount:body.frameCount,task:body.task,error:String(error.message || error),latencyMs:performance.now()-start});
           throw error;
         } finally {
-          clearTimeout(timer); pending.delete(id); externalSignal?.removeEventListener('abort',abort);
+          clearTimeout(timer); clearInterval(ownerWatch); pending.delete(id); externalSignal?.removeEventListener('abort',abort);
         }
       };
       post({type:'state'});

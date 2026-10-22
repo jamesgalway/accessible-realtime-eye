@@ -203,7 +203,11 @@ struct WebAssistantView: View {
         }
         .onChange(of: screenLaunch.pendingRequest) { _ in consumeScreenShareShortcut() }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            localScreen.setApplicationActive(true)
             consumeScreenShareShortcut()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+            localScreen.setApplicationActive(false)
         }
         .onDisappear {
             screenSharing.stop()

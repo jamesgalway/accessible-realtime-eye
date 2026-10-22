@@ -12,7 +12,19 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <cstring>
+#include <chrono>
+#include "LocalScreenCancelState.h"
 uint64_t huiyan_local_available_memory(void) { return os_proc_available_memory(); }
+static int64_t local_now_ns() {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+void * huiyan_local_cancel_create(void) { return new LocalScreenCancelState; }
+void huiyan_local_cancel_free(void * state) { delete static_cast<LocalScreenCancelState *>(state); }
+void huiyan_local_cancel_reset(void * state,double remaining_ms) {
+    if (state) static_cast<LocalScreenCancelState *>(state)->reset(remaining_ms>0 ? local_now_ns()+static_cast<int64_t>(remaining_ms*1e6) : 0);
+}
+void huiyan_local_cancel_request(void * state) { if(state) static_cast<LocalScreenCancelState *>(state)->cancel(); }
+bool huiyan_local_should_abort(void * state) { return !state || static_cast<LocalScreenCancelState *>(state)->shouldAbort(local_now_ns()); }
 uint64_t huiyan_local_footprint(void) {
     task_vm_info_data_t info = {};
     mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
