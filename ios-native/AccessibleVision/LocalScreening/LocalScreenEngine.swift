@@ -22,6 +22,14 @@ struct LocalScreenMeasurement: Codable {
 }
 
 final class LocalScreenEngine: @unchecked Sendable {
+    // Same launch argument as the official bridge. Read it here too so the
+    // memory plan describes the worker count the bridge actually applies.
+    static var ioThreads: Int {
+        let args = ProcessInfo.processInfo.arguments
+        guard let index = args.firstIndex(of: "-moeIoThreads"), index + 1 < args.count,
+              let value = Int(args[index + 1]), (1...64).contains(value) else { return 8 }
+        return value
+    }
     private let queue = DispatchQueue(label: "com.zzypiano.local-screen35b", qos: .userInitiated)
     private let lock = NSLock()
     private var revision = 0
@@ -72,7 +80,7 @@ final class LocalScreenEngine: @unchecked Sendable {
                     let started = ProcessInfo.processInfo.systemUptime
                     // The pinned engine's I/O pool accepts 1...64 workers.
                     // No expert count, quantization or result rules are changed.
-                    setenv("LLAMA_MOE_IO_THREADS","8",1)
+                    setenv("LLAMA_MOE_IO_THREADS",String(Self.ioThreads),1)
                     visionResident = false
                     var params = mb_mtmd_params_default()
                     params.n_predict = 12; params.n_ctx = 4096; params.n_ubatch = 256
@@ -97,7 +105,7 @@ final class LocalScreenEngine: @unchecked Sendable {
                     // keeps LES enabled without pre-reading a long-answer cache.
                     params.moe_prewarm_level = 0
                     params.spec_draft_n_max = 0
-                    var plan: [String:Any] = ["ioThreads":8,"availableBytes":available,"footprintBytes":footprint,"physicalBytes":ProcessInfo.processInfo.physicalMemory,
+                    var plan: [String:Any] = ["ioThreads":Self.ioThreads,"availableBytes":available,"footprintBytes":footprint,"physicalBytes":ProcessInfo.processInfo.physicalMemory,
                         "headroomBytes":headroom,"reserveBytes":reserve,"cacheSlots":cacheSlots,"ubatch":256,"activeExpertsPerLayer":8,
                         "lookaheadPrefetchDepth":params.moe_lookahead_prefetch_depth,"expertPrewarmLevel":0]
                     let planURL = FileManager.default.urls(for:.documentDirectory,in:.userDomainMask)[0].appendingPathComponent("local-screen-memory-plan.json")

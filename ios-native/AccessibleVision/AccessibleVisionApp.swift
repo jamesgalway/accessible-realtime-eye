@@ -9,7 +9,11 @@ struct AccessibleVisionApp: App {
 
     var body: some Scene {
         WindowGroup {
-            WebAssistantView()
+            if ProcessInfo.processInfo.arguments.contains("-huiyanLocalScreenBenchmark") {
+                LocalScreenBenchmarkView()
+            } else {
+                WebAssistantView()
+            }
         }
     }
 }
