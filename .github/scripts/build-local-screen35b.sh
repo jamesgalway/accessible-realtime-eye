@@ -11,6 +11,8 @@ git -C "$SOURCE" checkout --detach FETCH_HEAD
 test "$(git -C "$SOURCE" rev-parse HEAD)" = "$UPSTREAM_SHA"
 git -C "$SOURCE" submodule update --init --depth 1 llama.cpp-omni
 test "$(git -C "$SOURCE/llama.cpp-omni" rev-parse HEAD)" = "$ENGINE_SHA"
+python3 "$ROOT/.github/scripts/patch-local-vision-allocation.py" "$SOURCE/llama.cpp-omni" "$RUNNER_TEMP/local-vision-engine-patch.json"
+python3 "$ROOT/ios-native/Tests/test-local-vision-allocation.py" "$SOURCE/llama.cpp-omni" "$RUNNER_TEMP/local-vision-allocation-test"
 
 DEST="$ROOT/ios-native/LocalScreeningFramework"
 mkdir -p "$DEST"
@@ -26,3 +28,4 @@ for file in MBMtmd.h MBMtmd.mm MBPrewarmTable.h; do
 done
 cp "$SOURCE/LICENSE" "$ROOT/ios-native/AccessibleVision/LocalScreening/ThirdParty-NOTICES.txt"
 python3 "$ROOT/ios-native/Tests/verify-local-screen-catalog.py"
+cp "$RUNNER_TEMP/local-vision-engine-patch.json" "$BRIDGE/engine-allocation-patch.json"

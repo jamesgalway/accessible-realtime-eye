@@ -48,7 +48,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ios-native/LocalScreeningFramework/llama.xcframework
-          key: minicpm35b-fa9d837-96bbf61-xcode16.4-device-v1
+          key: minicpm35b-fa9d837-96bbf61-xcode16.4-device-vision-allocation-v2
 
       - name: Build pinned local vision runtime without model weights
         run: bash .github/scripts/build-local-screen35b.sh
@@ -57,7 +57,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ios-native/LocalScreeningFramework/llama.xcframework
-          key: minicpm35b-fa9d837-96bbf61-xcode16.4-device-v1
+          key: minicpm35b-fa9d837-96bbf61-xcode16.4-device-vision-allocation-v2
 
       - name: Build isolated screen runtime
         working-directory: ios-native/ScreenShareBuild
