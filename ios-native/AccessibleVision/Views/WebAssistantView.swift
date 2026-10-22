@@ -155,7 +155,7 @@ struct WebAssistantView: View {
                             defer { localScreenStarting = false }
                             do {
                                 try await localScreen.enableReminders(profile:.dense1b, voice:.google)
-                                localScreenStatus = "1B实验已启用，谷歌声音使用手机直连。"
+                                localScreenStatus = "1B筛图已启用，由谷歌直连Live看图判断并播报。"
                                 openAssistant(.googleVoice)
                             } catch { localScreenStatus = error.localizedDescription }
                         }

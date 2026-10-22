@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync('ios-native/AccessibleVision/LocalScreening/LocalScreenReminderBridge.swift', 'utf8').split('static let script = #"""')[1].split('"""#')[0];
 function create({ backend = 'aliyun', section = 'assistant', transport = 'aliyun-realtime',configTransport='browser-direct',modelReply } = {}) {
+  const liveCalls = [];
   const posts = [], http = [], timers = new Map(), intervals = new Map(), delays=[], events = [], modelCalls=[];
   const context = { URL, Response, AbortController, performance, console, appState:{geminiReminder:{transport}},
     location:{href:'https://example.test/',origin:'https://example.test',pathname:'/'},
@@ -20,8 +21,16 @@ function create({ backend = 'aliyun', section = 'assistant', transport = 'aliyun
     return new Response(JSON.stringify(String(path).endsWith('-prepare')?{prompt:'original contract prompt',model:'google-review',jsonMode:true,timeoutMs:3500,maxOutputTokens:160}:
       {ok:true,shouldAlert:true,state:'HIT',provider:'local-minicpm35b',transport:'native-local-minicpm35b'}),{status:200});
   };
+  context.__huiyanConditionalLiveSelect = () => {};
+  context.__huiyanConditionalLiveInstall = () => {};
+  context.__huiyanConditionalLiveReview = async args => {
+    liveCalls.push(args);
+    if(modelReply) await modelReply(args);
+    if(!args.owns() || args.signal.aborted) throw new Error('review过期');
+    return {shouldAlert:false,liveReviewHandled:true,liveSpoke:true};
+  };
   vm.runInNewContext(source, context);
-  return {context,posts,http,timers,intervals,delays,events,modelCalls};
+  return {context,posts,http,timers,intervals,delays,events,modelCalls,liveCalls};
 }
 const tick = () => new Promise(resolve=>setImmediate(resolve));
 const body = {task:'category=target_presence;mode=appear;lifecycle=once;target=authorized-subject;condition=authorized-condition;speakText=authorized-result',imageDataUrl:'data:image/jpeg;base64,AA==',promptMode:'deep_multitask',frameCount:1};
@@ -95,13 +104,14 @@ const options = () => ({method:'POST',headers:{'Content-Type':'application/json'
     g.http.length=0;
     const p=g.context.fetch('/api/active-reminder-check',options());await tick();
     g.context.__huiyanLocalScreenReply({id:g.posts.find(x=>x.type==='screen').id,model:'MiniCPM-V-4.7-1B',modelText:decision,modelLatencyMs:410,withinBudget:true});await p;
-    assert.equal(g.modelCalls.length,decision==='Y'?1:0);
-    assert.ok(!g.http.some(x=>x.path==='/api/active-reminder-local-describe'||x.path==='/api/active-reminder-check'));
+    assert.equal(g.modelCalls.length,0);
+    assert.equal(g.liveCalls.length,decision==='Y'?1:0);
+    assert.ok(!g.http.some(x=>x.path==='/api/active-reminder-local-describe'||x.path==='/api/active-reminder-direct-prepare'));
     if(decision==='Y') {
-      assert.deepEqual(g.http.map(x=>x.path),['/api/active-reminder-direct-prepare','/api/active-reminder-direct-finalize']);
-      assert.equal(g.http[0].body.modelProvider,'local-minicpm1b-google');assert.equal(g.http[1].body.modelProvider,'local-minicpm1b-google');
-      assert.equal(g.modelCalls[0].model,'google-review');assert.equal(g.modelCalls[0].contents[0].parts[0].text,'original contract prompt');
-      assert.equal(g.modelCalls[0].contents[0].parts[1].inlineData.data,'AA==');assert.ok(g.delays.includes(3500));
+      assert.equal(g.http.length,0);
+      assert.equal(g.liveCalls[0].body.task,body.task);
+      assert.equal(g.liveCalls[0].body.imageDataUrl,body.imageDataUrl);
+      assert.equal(g.liveCalls[0].reminder,g.context.appState.geminiReminder);
     }
     const event=g.events.find(x=>x[0]==='local_screening.result')[1];assert.equal(event.voice,'google');assert.equal(event.liveTransport,'browser-direct');
   }
@@ -115,5 +125,5 @@ const options = () => ({method:'POST',headers:{'Content-Type':'application/json'
   staleGoogle.context.appState.geminiReminder.activeTaskSeq=2;
   finishReview({text:'old result'});await oldRejected;
   assert.equal(staleGoogle.http.filter(x=>x.path.endsWith('-finalize')).length,0);
-  console.log('PASS: four original contracts, Ali unchanged, 1B Google same-frame direct review and no Ali call, N skips model, direct-only config, stale result isolation.');
+  console.log('PASS: four original contracts, Ali unchanged, 1B Google same-frame Live delegation, zero Lite/Ali calls, N skips model, direct-only config, stale result isolation.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

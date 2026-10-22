@@ -39,6 +39,7 @@ struct GreenCloudWebView: UIViewRepresentable {
         ))
         configuration.userContentController.add(context.coordinator, name: "nativeVision")
         if backend == .aliyun, presentationSection == "assistant" {
+            configuration.userContentController.addUserScript(WKUserScript(source:LocalScreenConditionalLive.script,injectionTime:.atDocumentStart,forMainFrameOnly:true))
             configuration.userContentController.addUserScript(WKUserScript(source:LocalScreenReminderBridge.script,injectionTime:.atDocumentStart,forMainFrameOnly:true))
             configuration.userContentController.add(context.coordinator,name:"nativeLocalScreen")
         }
