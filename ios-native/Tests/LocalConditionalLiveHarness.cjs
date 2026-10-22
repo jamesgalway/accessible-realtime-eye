@@ -46,6 +46,7 @@ function create() {
   const input=create(), ip=input.check();input.message({inputText:'new user question',outputText:'old',audioParts:[{data:'old'}],turnComplete:true});await assert.rejects(ip.promise,/cancelled/);assert.equal(input.r.inputTranscriptBuffer,'new user question');assert.equal(input.played.length,0);
   input.message({outputText:'ordinary answer',audioParts:[{data:'ordinary'}],turnComplete:true});assert.deepEqual(input.played,['ordinary']);
   const timeout=create(), tp=timeout.check();[...timeout.timers.values()][0]();await assert.rejects(tp.promise,/timeout/);assert.equal(timeout.closed,1);
+  const error=create(), ep=error.check();error.c.handleGeminiLiveMessage(JSON.stringify({type:'gemini.error'}));await assert.rejects(ep.promise,/gemini.error/);assert.equal(error.closed,1);
   const busy=create();busy.r.turnInProgress=true;await assert.rejects(busy.check().promise,/当前回合/);assert.equal(busy.sent.length,0);
   const failure=create();await failure.c.runGeminiActiveReminderTick();assert.equal(failure.r.inFlight,false);assert.equal(failure.r.activeInFlightCount,0);
   failure.c.__huiyanConditionalLiveSelect(false);await failure.c.runGeminiActiveReminderTick();assert.equal(failure.baseTicks,1);

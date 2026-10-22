@@ -67,13 +67,18 @@ enum LocalScreenConditionalLive {
             return originalMessage(raw);
           }
           if (m.type === 'gemini.closed' || m.type === 'gemini.error') {
-            clearTimeout(entry.timer); active = null; cancel(entry, m.type);
+            clearTimeout(entry.timer); active = null; cancel(entry, m.type, m.type === 'gemini.error');
             return originalMessage(raw);
           }
           if (m.type !== 'gemini.message') return originalMessage(raw);
           if (!current(entry) || entry.signal.aborted || meaningful(m.inputText) || m.interrupted) cancel(entry, 'review_cancelled');
           if (!entry.discard) {
             entry.text += m.outputText || '';
+            if (!entry.firstAudio && (m.audioParts || []).some(part => part.data)) {
+              entry.firstAudio = true;
+              log('first_audio', {frameCount:entry.body.frameCount,task:entry.body.task,
+                latencyMs:performance.now()-entry.started});
+            }
             entry.buffer.push(...(m.audioParts || []));
             if (!entry.admitted && meaningful(entry.text) && !admit(entry)) cancel(entry, 'speech_busy_or_duplicate');
           }
