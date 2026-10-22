@@ -209,6 +209,9 @@ struct WebAssistantView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
             localScreen.setApplicationActive(false)
         }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
+            localScreen.handleMemoryWarning()
+        }
         .onDisappear {
             screenSharing.stop()
             setIdleTimerDisabled(false)

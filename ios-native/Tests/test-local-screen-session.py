@@ -2,6 +2,9 @@ from pathlib import Path
 import subprocess,sys
 root=Path(__file__).resolve().parents[2];out=Path(sys.argv[1]);out.mkdir(parents=True,exist_ok=True)
 api=(root/'.github/scripts/local-screen-session-api.cpp').read_text(encoding='utf-8')
+bridge=(Path(sys.argv[2])/'MBMtmd.mm').read_text(encoding='utf-8')
+start=bridge.index('static bool mb_release_vision(')
+release=bridge[start:bridge.index('// Counterpart to mb_release_vision()',start)]
 code=r'''
 #include <cassert>
 #include <cstring>
@@ -12,7 +15,7 @@ code=r'''
 #include "LocalScreenCancelState.h"
 using llama_pos=int;
 struct Lctx{std::vector<uint8_t> state;};
-struct mb_mtmd_context{std::unique_ptr<Lctx> lctx{new Lctx};std::unique_ptr<int> sampler{new int(1)};
+struct mb_mtmd_context{bool local_keep_vision=false;std::unique_ptr<int> vision{new int(1)};std::unique_ptr<Lctx> lctx{new Lctx};std::unique_ptr<int> sampler{new int(1)};
  std::vector<uint8_t> local_system_state,local_task_state;std::string local_system_text,local_task_text,pending_image,last_error;
  int local_system_n_past=0,local_task_n_past=0,n_past=0;};
 int prefills=0,resets=0;bool restoreFailure=false,sizeFailure=false;
@@ -26,9 +29,19 @@ size_t llama_state_seq_set_data(Lctx*ctx,const uint8_t*data,size_t size,int){if(
 void llama_sampler_reset(int*){++resets;}
 void mb_logf(const char*,...){}
 void set_error(mb_mtmd_context*ctx,const std::string&e){ctx->last_error=e;}
-'''+api+r'''
+int visionReleases=0;
+bool mb_unload_mmproj_enabled(){return true;}
+bool mtmd_vision_loaded(int*ptr){return *ptr!=0;}
+bool mtmd_vision_unload(int*ptr){*ptr=0;++visionReleases;return true;}
+double footprint_mib(){return 0;}
+void mb_log_mem(const char*){}
+'''+release+api+r'''
 int main(){
  mb_mtmd_context ctx;assert(mb_mtmd_local_prepare_system(&ctx,"fixed rules"));
+ mb_mtmd_local_set_vision_resident(&ctx,true);assert(ctx.local_keep_vision&&visionReleases==0);
+ assert(!mb_release_vision(&ctx,"next frame")&&visionReleases==0);
+ mb_mtmd_local_set_vision_resident(&ctx,false);assert(!ctx.local_keep_vision&&visionReleases==1);
+ assert(!mb_release_vision(nullptr,"no context"));
  auto fixed=ctx.lctx->state;int position=ctx.n_past;
  assert(mb_mtmd_local_prepare_system(&ctx,"fixed rules"));assert(prefills==1);
  for(int task=0;task<2;++task){ctx.lctx->state={'o','l','d'};ctx.n_past=100;ctx.pending_image="prior scene";
@@ -53,4 +66,4 @@ int main(){
 (out/'test.cpp').write_text(code,encoding='utf-8')
 subprocess.run(['clang++','-std=c++17','-I',str(root/'ios-native/AccessibleVision/LocalScreening'),str(out/'test.cpp'),'-o',str(out/'test')],check=True)
 subprocess.run([str(out/'test')],check=True)
-print('PASS: system and question prefill once, new question replaces old data, old frames/results removed, failed restore rejected, cancel/deadline/reset behavior.')
+print('PASS: original release retained by default, opted-in residency skips release, warning releases vision; isolated cached questions, failed restore and cancellation checks passed.')

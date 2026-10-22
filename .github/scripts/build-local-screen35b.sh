@@ -32,4 +32,4 @@ cp "$RUNNER_TEMP/local-vision-engine-patch.json" "$BRIDGE/engine-allocation-patc
 python3 "$ROOT/.github/scripts/patch-local-vision-ubatch.py" "$BRIDGE" "$BRIDGE/bridge-ubatch-patch.json"
 python3 "$ROOT/ios-native/Tests/test-local-vision-ubatch.py" "$BRIDGE" "$RUNNER_TEMP/local-vision-ubatch-test"
 python3 "$ROOT/.github/scripts/patch-local-screen-session.py" "$BRIDGE"
-python3 "$ROOT/ios-native/Tests/test-local-screen-session.py" "$RUNNER_TEMP/local-screen-session-test"
+python3 "$ROOT/ios-native/Tests/test-local-screen-session.py" "$RUNNER_TEMP/local-screen-session-test" "$BRIDGE"

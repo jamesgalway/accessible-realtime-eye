@@ -1,7 +1,7 @@
 from pathlib import Path
 import hashlib,json,sys
 directory=Path(sys.argv[1]);scripts=Path(__file__).resolve().parent
-manifest={'version':'fixed-system-task-state-and-abort-v2','files':{}}
+manifest={'version':'fixed-system-task-state-and-resident-vision-v3','files':{}}
 for name in ['MBMtmd.h','MBMtmd.mm']:
     path=directory/name;before=path.read_bytes();text=before.decode('utf-8')
     if name.endswith('.h'):
@@ -11,7 +11,10 @@ for name in ['MBMtmd.h','MBMtmd.mm']:
         text=text.replace(needle,(scripts/'local-screen-session-api.h').read_text(encoding='utf-8')+'\n'+needle,1)
     else:
         needle='struct mb_mtmd_context {';assert text.count(needle)==1
-        text=text.replace(needle,needle+'\n    std::vector<uint8_t> local_system_state, local_task_state;\n    std::string local_system_text, local_task_text;\n    llama_pos local_system_n_past = 0, local_task_n_past = 0;',1)
+        text=text.replace(needle,needle+'\n    bool local_keep_vision = false;\n    std::vector<uint8_t> local_system_state, local_task_state;\n    std::string local_system_text, local_task_text;\n    llama_pos local_system_n_past = 0, local_task_n_past = 0;',1)
+        needle='static bool mb_release_vision(mb_mtmd_context * ctx, const char * where) {\n'
+        assert text.count(needle)==1
+        text=text.replace(needle,needle+'    if (ctx && ctx->local_keep_vision) return false;\n',1)
         needle='    } else if (role == "system") {'
         assert text.count(needle)==1
         text=text.replace(needle,'    } else if (role == "local_reminder_task") {\n        formatted += "<|im_start|>user\\n" + text + "<|im_end|>\\n";\n'+needle,1)

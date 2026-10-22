@@ -19,6 +19,12 @@ final class LocalScreenLab: ObservableObject {
         if loaded || busy { record(["event":active ? "local_app_active" : "local_app_suspended"]) }
     }
 
+    func handleMemoryWarning() {
+        guard loaded else { return }
+        engine.releaseVisionForMemoryWarning()
+        record(["event":"local_memory_warning_encoder_released"])
+    }
+
     func enableReminders() async throws {
         guard applicationActive else { throw LocalScreenError.message("请回到慧眼前台后再加载。") }
         guard !busy else { throw LocalScreenError.message("本地模型正在处理上一项任务，请稍后再试。") }

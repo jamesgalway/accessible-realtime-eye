@@ -1,6 +1,12 @@
 void mb_mtmd_local_set_abort(mb_mtmd_context * ctx, bool (*callback)(void *), void * data) {
     if (ctx && ctx->lctx) llama_set_abort_callback(ctx->lctx.get(), callback, data);
 }
+void mb_mtmd_local_set_vision_resident(mb_mtmd_context * ctx, bool enabled) {
+    if (!ctx) return;
+    ctx->local_keep_vision = enabled;
+    if (!enabled) mb_release_vision(ctx,"local residency released");
+    mb_logf("[huiyan-local] vision residency: %s",enabled ? "retained across frames" : "original release/reload");
+}
 bool mb_mtmd_local_prepare_system(mb_mtmd_context * ctx, const char * text) {
     if (!ctx || !ctx->lctx || !text || !*text) return false;
     if (!ctx->local_system_state.empty() && ctx->local_system_text == text) return true;
