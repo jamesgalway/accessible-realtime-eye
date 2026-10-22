@@ -1,7 +1,7 @@
 from pathlib import Path
 import hashlib,json,sys
 directory=Path(sys.argv[1]);scripts=Path(__file__).resolve().parent
-manifest={'version':'fixed-system-task-state-and-resident-vision-v3','files':{}}
+manifest={'version':'fixed-system-task-state-and-resident-vision-v4-1b-text-position','files':{}}
 for name in ['MBMtmd.h','MBMtmd.mm']:
     path=directory/name;before=path.read_bytes();text=before.decode('utf-8')
     if name.endswith('.h'):
@@ -18,6 +18,12 @@ for name in ['MBMtmd.h','MBMtmd.mm']:
         needle='    } else if (role == "system") {'
         assert text.count(needle)==1
         text=text.replace(needle,'    } else if (role == "local_reminder_task") {\n        formatted += "<|im_start|>user\\n" + text + "<|im_end|>\\n";\n'+needle,1)
+        # Dense 1B has canvas time in slot z. The merged embedding batch is
+        # permuted ZYXT by llama.cpp, so text z must equal its text position,
+        # matching token-only prefill. Retain the original 35B path exactly.
+        needle='pos[off + k + 3 * total]       = 0; //'
+        assert text.count(needle)==1
+        text=text.replace(needle,'pos[off + k + 3 * total]       = ctx->model_version == 471 ? p + (llama_pos) k : 0; //',1)
         text+='\n'+(scripts/'local-screen-session-api.cpp').read_text(encoding='utf-8')
     after=text.encode('utf-8');path.write_bytes(after)
     manifest['files'][name]={'before':hashlib.sha256(before).hexdigest(),'after':hashlib.sha256(after).hexdigest()}
