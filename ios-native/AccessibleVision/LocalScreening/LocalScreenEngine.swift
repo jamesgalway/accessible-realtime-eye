@@ -17,6 +17,7 @@ struct LocalScreenMeasurement: Codable {
     let taskPrefixReused: Bool
     let taskPrefixMs: Double
     let visionPrepareMs: Double
+    let expertPrewarmMs: Double
     let visionResident: Bool
 }
 
@@ -91,10 +92,14 @@ final class LocalScreenEngine: @unchecked Sendable {
                     cacheSlots = min(32, max(0, affordable - 8) / 8 * 8)
                     params.moe_lookahead_prefetch_depth = cacheSlots > 0 ? 8 : 0
                     params.moe_decode_window = Int32(cacheSlots)
-                    params.moe_prewarm_level = Int32(min(16, cacheSlots))
+                    // Static decode prewarm costs ~0.5s per frame and is not
+                    // reused by image prefill. This one-marker screening path
+                    // keeps LES enabled without pre-reading a long-answer cache.
+                    params.moe_prewarm_level = 0
                     params.spec_draft_n_max = 0
                     var plan: [String:Any] = ["ioThreads":8,"availableBytes":available,"footprintBytes":footprint,"physicalBytes":ProcessInfo.processInfo.physicalMemory,
-                        "headroomBytes":headroom,"reserveBytes":reserve,"cacheSlots":cacheSlots,"ubatch":256,"activeExpertsPerLayer":8]
+                        "headroomBytes":headroom,"reserveBytes":reserve,"cacheSlots":cacheSlots,"ubatch":256,"activeExpertsPerLayer":8,
+                        "lookaheadPrefetchDepth":params.moe_lookahead_prefetch_depth,"expertPrewarmLevel":0]
                     let planURL = FileManager.default.urls(for:.documentDirectory,in:.userDomainMask)[0].appendingPathComponent("local-screen-memory-plan.json")
                     try? JSONSerialization.data(withJSONObject:plan,options:[.sortedKeys]).write(to:planURL,options:.atomic)
                     let model = directory.appendingPathComponent(Self.model).path
@@ -124,6 +129,7 @@ final class LocalScreenEngine: @unchecked Sendable {
                                 params.moe_decode_window = 0; params.moe_lookahead_prefetch_depth = 0
                                 params.moe_prewarm_level = 0; params.n_ubatch = 128
                                 plan["cacheSlots"] = 0; plan["ubatch"] = 128
+                                plan["lookaheadPrefetchDepth"] = 0
                                 plan["gpuReducedCacheRetry"] = true
                                 huiyan_local_vision_log_clear_error()
                                 huiyan_local_log_gpu_state("retry-gpu-without-expert-cache")
@@ -169,10 +175,11 @@ final class LocalScreenEngine: @unchecked Sendable {
                     plan["systemPrefixBytes"] = mb_mtmd_local_system_size(created)
                     plan["systemRulesPreparedOnce"] = true
                     // GPU initialization/fallback has already succeeded with the
-                    // original allocation behavior. Only retain vision when the
-                    // optional expert cache/prefetch are both off. A real system
-                    // memory warning cancels current work and releases residency.
-                    visionResident = cacheSlots == 0 && params.moe_lookahead_prefetch_depth == 0 && params.mmproj_use_gpu
+                    // original allocation behavior. Keep the GPU encoder across
+                    // frames also when the granted memory supports an expert
+                    // cache; the old zero-cache condition forced ~1s reloads.
+                    // A real warning still cancels work and releases residency.
+                    visionResident = params.mmproj_use_gpu
                     mb_mtmd_local_set_vision_resident(created,visionResident)
                     plan["visionResident"] = visionResident
                     try? JSONSerialization.data(withJSONObject:plan,options:[.sortedKeys]).write(to:planURL,options:.atomic)
@@ -216,7 +223,9 @@ final class LocalScreenEngine: @unchecked Sendable {
                     guard current(token) else { throw CancellationError() }
                     // Include expert prewarm in wall-clock latency; do not hide it
                     // between image selection and the timed generation step.
+                    let prewarmStarted = ProcessInfo.processInfo.systemUptime
                     guard mb_mtmd_prewarm_after_image(context) == 0 else { throw LocalScreenError.message("专家预读失败。") }
+                    let expertPrewarmMs = (ProcessInfo.processInfo.systemUptime-prewarmStarted)*1000
                     let prompt = preparedPrompt == nil ? "只根据当前图片判断条件：\(condition)\n清晰满足输出HIT；清晰未满足输出NO_HIT；看不清或证据不足输出UNCERTAIN。只输出一个英文标记，不解释，不推断先前画面。" : "核验当前图。"
                     guard prompt.withCString({ text in "user".withCString { mb_mtmd_prefill_text(context, text, $0) } }) == 0 else {
                         throw LocalScreenError.message(String(cString: mb_mtmd_get_last_error(context)))
@@ -245,7 +254,7 @@ final class LocalScreenEngine: @unchecked Sendable {
                         footprintBytes: footprint, availableBytes: available, cacheSlots: cacheSlots,
                         budgetMs:budgetMs,systemPrefixReused:preparedPrompt != nil,
                         taskPrefixReused:taskPrefixReused,taskPrefixMs:taskPrefixMs,
-                        visionPrepareMs:visionPrepareMs,visionResident:visionResident))
+                        visionPrepareMs:visionPrepareMs,expertPrewarmMs:expertPrewarmMs,visionResident:visionResident))
                 } catch { continuation.resume(throwing: error) }
             }
         }

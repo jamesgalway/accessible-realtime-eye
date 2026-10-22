@@ -59,6 +59,7 @@ final class LocalScreenLab: ObservableObject {
         }
         if let data = try? JSONEncoder().encode(result), var event = (try? JSONSerialization.jsonObject(with:data)) as? [String:Any] {
             event["event"] = "reminder_screen_result"; event["requestID"] = requestID; event["task"] = task
+            event["thermalState"] = ProcessInfo.processInfo.thermalState.rawValue
             record(event)
         }
         return result

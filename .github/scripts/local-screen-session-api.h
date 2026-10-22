@@ -6,5 +6,5 @@ size_t mb_mtmd_local_system_size(mb_mtmd_context * ctx);
 // Task data is a closed user message without an assistant generation header.
 // This snapshot never contains a frame or generated result.
 bool mb_mtmd_local_prepare_task(mb_mtmd_context * ctx, const char * text, bool * reused);
-// Only the native zero-expert-cache experiment opts in; default is unchanged.
+// Only the native screening experiment opts in; default is unchanged.
 void mb_mtmd_local_set_vision_resident(mb_mtmd_context * ctx, bool enabled);
