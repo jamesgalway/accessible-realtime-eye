@@ -146,6 +146,11 @@ final class LocalScreenEngine: @unchecked Sendable {
                 do {
                     guard current(token) else { throw CancellationError() }
                     guard let context else { throw LocalScreenError.message("请先加载35B模型。") }
+                    let documents = FileManager.default.urls(for:.documentDirectory,in:.userDomainMask)[0]
+                    let visionLog = documents.appendingPathComponent("local-screen-vision-screen.log").path
+                    let metalLog = documents.appendingPathComponent("local-screen-metal-screen.log").path
+                    visionLog.withCString { visionPath in metalLog.withCString { huiyan_local_vision_log_begin(visionPath, $0) } }
+                    defer { huiyan_local_vision_log_end() }
                     guard mb_mtmd_clean_kv_cache(context) else { throw LocalScreenError.message("本地模型未能释放上一张图的上下文。") }
                     try jpeg.write(to: temporary)
                     mb_mtmd_perf_reset(context)

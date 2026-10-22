@@ -67,7 +67,7 @@ void huiyan_local_vision_log_begin(const char * path, const char * metal_path) {
         }
         close(output);
     }
-    huiyan_local_log_gpu_state("before-model-load");
+    huiyan_local_log_gpu_state("capture-start");
     {
         std::lock_guard<std::mutex> guard(visionLogMutex);
         visionLogPath = path ? path : ""; visionErrors.clear(); visionLogBytes = 0;

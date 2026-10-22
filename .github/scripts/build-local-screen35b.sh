@@ -29,3 +29,5 @@ done
 cp "$SOURCE/LICENSE" "$ROOT/ios-native/AccessibleVision/LocalScreening/ThirdParty-NOTICES.txt"
 python3 "$ROOT/ios-native/Tests/verify-local-screen-catalog.py"
 cp "$RUNNER_TEMP/local-vision-engine-patch.json" "$BRIDGE/engine-allocation-patch.json"
+python3 "$ROOT/.github/scripts/patch-local-vision-ubatch.py" "$BRIDGE" "$BRIDGE/bridge-ubatch-patch.json"
+python3 "$ROOT/ios-native/Tests/test-local-vision-ubatch.py" "$BRIDGE" "$RUNNER_TEMP/local-vision-ubatch-test"
