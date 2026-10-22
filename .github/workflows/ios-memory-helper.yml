@@ -1,0 +1,42 @@
+name: Build scoped memory helper network fix
+on:
+  push:
+    branches: [ios-memory-helper-network-20261022]
+    paths: ['.github/memory-helper/**', '.github/workflows/ios-memory-helper.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 25
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test actual header transport
+        run: |
+          swiftc -swift-version 5 -parse-as-library .github/memory-helper/AnisetteHeaderTransport.swift .github/memory-helper/TransportTests.swift -o "$RUNNER_TEMP/header-tests"
+          "$RUNNER_TEMP/header-tests"
+      - name: Prepare pinned helper and scoped patch
+        run: python3 .github/memory-helper/prepare.py "$RUNNER_TEMP/GetMoreRam-network"
+      - name: Build helper
+        working-directory: ${{ runner.temp }}/GetMoreRam-network
+        run: |
+          xcrun agvtool new-version -all 4
+          xcodebuild archive -project GetMoreRam.xcodeproj -scheme GetMoreRam -configuration Release -destination 'generic/platform=iOS' -archivePath build/GetMoreRam.xcarchive CODE_SIGN_IDENTITY='' CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
+      - name: Package unsigned helper
+        working-directory: ${{ runner.temp }}/GetMoreRam-network
+        run: |
+          mkdir -p build/ipa/Payload dist
+          cp -R build/GetMoreRam.xcarchive/Products/Applications/GetMoreRam.app build/ipa/Payload/
+          ditto -c -k --norsrc --keepParent build/ipa/Payload dist/GetMoreRam-NetworkFix.ipa
+          cp network-fix-receipt.json dist/
+          shasum -a 256 dist/GetMoreRam-NetworkFix.ipa > dist/GetMoreRam-NetworkFix.ipa.sha256
+          unzip -t dist/GetMoreRam-NetworkFix.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GetMoreRam-NetworkFix
+          path: ${{ runner.temp }}/GetMoreRam-network/dist/*
+          if-no-files-found: error
+          retention-days: 7
