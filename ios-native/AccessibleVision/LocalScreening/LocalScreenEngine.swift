@@ -73,7 +73,8 @@ final class LocalScreenEngine: @unchecked Sendable {
                     let vision = directory.appendingPathComponent("mmproj-model-f16.gguf").path
                     let experts = directory.appendingPathComponent("experts").path
                     let visionLog = planURL.deletingLastPathComponent().appendingPathComponent("local-screen-vision-load.log").path
-                    visionLog.withCString { huiyan_local_vision_log_begin($0) }
+                    let metalLog = planURL.deletingLastPathComponent().appendingPathComponent("local-screen-metal-load.log").path
+                    visionLog.withCString { visionPath in metalLog.withCString { huiyan_local_vision_log_begin(visionPath, $0) } }
                     defer { huiyan_local_vision_log_end() }
                     func initialize() -> OpaquePointer? {
                         model.withCString { modelPath in vision.withCString { visionPath in experts.withCString { expertsPath in
@@ -87,15 +88,35 @@ final class LocalScreenEngine: @unchecked Sendable {
                         let visionError = String(cString: huiyan_local_vision_error())
                         plan["visionGPUError"] = visionError.isEmpty ? bridgeError : visionError
                         if bridgeError.contains("Failed to load mmproj"), huiyan_local_vision_cpu_retryable() != 0, current(token) {
-                            // A failed init has already released its context. Retry only
-                            // the vision device; leave the language/MoE GPU settings intact.
-                            params.mmproj_use_gpu = false
-                            huiyan_local_vision_log_clear_error()
-                            plan["visionBackend"] = "cpu"
-                            try? JSONSerialization.data(withJSONObject:plan,options:[.sortedKeys]).write(to:planURL,options:.atomic)
-                            created = initialize()
+                            // First keep vision on GPU and release optional expert
+                            // cache/prefetch plus reduce the compute batch. K stays 8.
+                            if cacheSlots > 0 {
+                                plan["visionInitialCacheSlots"] = cacheSlots
+                                cacheSlots = 0
+                                params.moe_decode_window = 0; params.moe_lookahead_prefetch_depth = 0
+                                params.moe_prewarm_level = 0; params.n_ubatch = 128
+                                plan["cacheSlots"] = 0; plan["ubatch"] = 128
+                                plan["gpuReducedCacheRetry"] = true
+                                huiyan_local_vision_log_clear_error()
+                                huiyan_local_log_gpu_state("retry-gpu-without-expert-cache")
+                                try? JSONSerialization.data(withJSONObject:plan,options:[.sortedKeys]).write(to:planURL,options:.atomic)
+                                created = initialize()
+                            }
+                            if created == nil, current(token),
+                               String(cString:mb_mtmd_last_init_error()).contains("Failed to load mmproj"),
+                               huiyan_local_vision_cpu_retryable() != 0 {
+                                plan["visionReducedGPUError"] = String(cString:huiyan_local_vision_error())
+                                // CPU vision is the final allocation fallback. The
+                                // language/MoE model still uses its GPU implementation.
+                                params.mmproj_use_gpu = false
+                                huiyan_local_vision_log_clear_error()
+                                plan["visionBackend"] = "cpu"
+                                try? JSONSerialization.data(withJSONObject:plan,options:[.sortedKeys]).write(to:planURL,options:.atomic)
+                                created = initialize()
+                            }
                         }
                     }
+                    huiyan_local_log_gpu_state(created == nil ? "model-load-failed" : "model-loaded")
                     if created == nil {
                         let visionError = String(cString: huiyan_local_vision_error())
                         let bridgeError = String(cString: mb_mtmd_last_init_error())

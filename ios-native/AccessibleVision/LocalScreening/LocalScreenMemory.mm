@@ -8,6 +8,10 @@
 #include <mutex>
 #include <string>
 #include "LocalVisionFailure.h"
+#import <Metal/Metal.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <cstring>
 uint64_t huiyan_local_available_memory(void) { return os_proc_available_memory(); }
 uint64_t huiyan_local_footprint(void) {
     task_vm_info_data_t info = {};
@@ -21,8 +25,25 @@ uint64_t huiyan_local_footprint(void) {
 static std::mutex visionLogMutex;
 static std::string visionLogPath, visionErrors;
 static size_t visionLogBytes = 0;
+static int savedEngineStderr = -1;
+void huiyan_local_log_gpu_state(const char * phase) {
+    @autoreleasepool {
+        id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+        if (!device) { fprintf(stderr, "[huiyan-gpu] %s no Metal device\n", phase); return; }
+        fprintf(stderr, "[huiyan-gpu] %s device=%s maxBufferLength=%llu recommendedWorkingSet=%llu allocated=%llu processAvailable=%llu footprint=%llu\n",
+            phase, device.name.UTF8String,
+            (unsigned long long)device.maxBufferLength, (unsigned long long)device.recommendedMaxWorkingSetSize,
+            (unsigned long long)device.currentAllocatedSize, (unsigned long long)huiyan_local_available_memory(),
+            (unsigned long long)huiyan_local_footprint());
+        fflush(stderr);
+#if !__has_feature(objc_arc)
+        [device release];
+#endif
+    }
+}
 static void vision_log(enum ggml_log_level level, const char * text, void *) {
     if (!text) return;
+    if (strstr(text, "model size:")) huiyan_local_log_gpu_state("before-vision-weights");
     std::lock_guard<std::mutex> guard(visionLogMutex);
     if (level == GGML_LOG_LEVEL_ERROR) {
         visionErrors += text;
@@ -34,7 +55,19 @@ static void vision_log(enum ggml_log_level level, const char * text, void *) {
         fclose(file);
     }
 }
-void huiyan_local_vision_log_begin(const char * path) {
+void huiyan_local_vision_log_begin(const char * path, const char * metal_path) {
+    // Preserve the engine's original callbacks while capturing the Metal driver
+    // messages they write to stderr. Restore the descriptor when loading ends.
+    fflush(stderr);
+    const int output = open(metal_path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (output >= 0) {
+        savedEngineStderr = dup(STDERR_FILENO);
+        if (savedEngineStderr >= 0 && dup2(output, STDERR_FILENO) < 0) {
+            close(savedEngineStderr); savedEngineStderr = -1;
+        }
+        close(output);
+    }
+    huiyan_local_log_gpu_state("before-model-load");
     {
         std::lock_guard<std::mutex> guard(visionLogMutex);
         visionLogPath = path ? path : ""; visionErrors.clear(); visionLogBytes = 0;
@@ -56,4 +89,10 @@ int huiyan_local_vision_cpu_retryable(void) {
     std::lock_guard<std::mutex> guard(visionLogMutex);
     return huiyan_vision_cpu_retryable(visionErrors);
 }
-void huiyan_local_vision_log_end(void) { mtmd_log_set(nullptr, nullptr); }
+void huiyan_local_vision_log_end(void) {
+    mtmd_log_set(nullptr, nullptr);
+    fflush(stderr);
+    if (savedEngineStderr >= 0) {
+        dup2(savedEngineStderr, STDERR_FILENO); close(savedEngineStderr); savedEngineStderr = -1;
+    }
+}
