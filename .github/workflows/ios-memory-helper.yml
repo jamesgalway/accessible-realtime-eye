@@ -14,16 +14,16 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
-      - name: Test actual header transport
+      - name: Test App ID response diagnostics
         run: |
-          swiftc -swift-version 5 -parse-as-library .github/memory-helper/AnisetteHeaderTransport.swift .github/memory-helper/TransportTests.swift -o "$RUNNER_TEMP/header-tests"
-          "$RUNNER_TEMP/header-tests"
+          swiftc -swift-version 5 -parse-as-library .github/memory-helper/AppIDListResponse.swift .github/memory-helper/AppIDListResponseTests.swift -o "$RUNNER_TEMP/appid-tests"
+          "$RUNNER_TEMP/appid-tests"
       - name: Prepare pinned helper and scoped patch
         run: python3 .github/memory-helper/prepare.py "$RUNNER_TEMP/GetMoreRam-network"
       - name: Build helper
         working-directory: ${{ runner.temp }}/GetMoreRam-network
         run: |
-          xcrun agvtool new-version -all 4
+          xcrun agvtool new-version -all 5
           xcodebuild archive -project GetMoreRam.xcodeproj -scheme GetMoreRam -configuration Release -destination 'generic/platform=iOS' -archivePath build/GetMoreRam.xcarchive CODE_SIGN_IDENTITY='' CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
       - name: Package unsigned helper
         working-directory: ${{ runner.temp }}/GetMoreRam-network
