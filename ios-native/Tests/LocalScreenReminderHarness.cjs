@@ -35,7 +35,7 @@ function create({ backend = 'aliyun', section = 'assistant', transport = 'aliyun
 const tick = () => new Promise(resolve=>setImmediate(resolve));
 const body = {task:'category=target_presence;mode=appear;lifecycle=once;target=authorized-subject;condition=authorized-condition;speakText=authorized-result',imageDataUrl:'data:image/jpeg;base64,AA==',promptMode:'deep_multitask',frameCount:1};
 const options = () => ({method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-function decisionTurn(outcome = 'accepted') {
+function decisionTurn(outcome = 'accepted', late = false) {
   const played=[], forwarded=[]; let resolveRecovery;
   const r={pendingTaskSetupTranscript:'authorized reminder',activeTaskSeq:1};
   const rt={aliCheapContractCandidateSeq:1};
@@ -62,11 +62,18 @@ function decisionTurn(outcome = 'accepted') {
       if(accepted) { r.activeTaskSeq++;played.push('accepted confirmation'); }
       return accepted;
     }};
+  const eventHandler=c.handleRealtimeServerEvent, normalizer=c.startSpeedReminderTaskNormalizeFromConfirmation;
+  if(late) { delete c.handleRealtimeServerEvent;delete c.startSpeedReminderTaskNormalizeFromConfirmation; }
   c.window=c;vm.runInNewContext(source,c);c.__huiyanSetLocalScreenEnabled(true);
+  if(late) { c.handleRealtimeServerEvent=eventHandler;c.startSpeedReminderTaskNormalizeFromConfirmation=normalizer; }
   return {c,r,rt,played,forwarded,finish:value=>resolveRecovery(value),
     send:(type,delta)=>c.handleRealtimeServerEvent({type,delta})};
 }
 (async()=>{
+  const loading=decisionTurn('accepted',true);
+  await loading.c.fetch('/api/health');
+  await loading.send('response.audio.delta','early loading question');await loading.send('response.done');
+  assert.deepEqual(loading.played,[]);loading.finish(true);await tick();assert.deepEqual(loading.played,['accepted confirmation']);
   const accepted=decisionTurn();
   await accepted.send('response.audio.delta','premature question');assert.deepEqual(accepted.played,[]);
   await accepted.send('response.audio.done');await accepted.send('response.done');assert.deepEqual(accepted.played,[]);

@@ -101,8 +101,11 @@ final class LocalScreenReminderBridge {
       // local Ali decision turn until the existing tool/recovery path settles.
       // Ordinary answers are released unchanged; accepted contracts use the one
       // existing confirmation. No extra classification or model request.
-      if (typeof handleRealtimeServerEvent === 'function'
-          && typeof startSpeedReminderTaskNormalizeFromConfirmation === 'function') {
+      let aliDecisionGateInstalled = false;
+      function installAliDecisionGate() {
+        if (aliDecisionGateInstalled || typeof handleRealtimeServerEvent !== 'function'
+            || typeof startSpeedReminderTaskNormalizeFromConfirmation !== 'function') return;
+        aliDecisionGateInstalled = true;
         const originalEvent = handleRealtimeServerEvent;
         const originalNormalize = startSpeedReminderTaskNormalizeFromConfirmation;
         let staged = null, recovering = null;
@@ -163,7 +166,9 @@ final class LocalScreenReminderBridge {
           return originalEvent(message);
         };
       }
+      installAliDecisionGate();
       window.fetch = async (input, init = {}) => {
+        installAliDecisionGate();
         const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url, location.href);
         if (enabled && selectedVoice !== 'aliyun' && url.origin === location.origin && url.pathname === '/api/gemini-browser-config') {
           const response = await originalFetch(input, init);
