@@ -11,6 +11,7 @@ function create({ backend = 'aliyun', section = 'assistant', transport = 'aliyun
     logClientEvent:(...args)=>events.push(args),parseImageDataUrlForClient:value=>({mimeType:'image/jpeg',data:value.split(',')[1]}),
     setTimeout:(fn,ms)=>{const id=timers.size+1;timers.set(id,fn);delays.push(ms);return id;},clearTimeout:id=>timers.delete(id),
     setInterval:fn=>{const id=intervals.size+1;intervals.set(id,fn);return id;},clearInterval:id=>intervals.delete(id) };
+  context.HuiyanModelLayers = require('../../shared/huiyan-model-layers.js');
   context.window = context;
   context.__ACCESSIBLE_VISION_BACKEND__ = backend; context.__ACCESSIBLE_VISION_SECTION__ = section;
   context.webkit = {messageHandlers:{nativeLocalScreen:{postMessage:m=>posts.push(m)}}};

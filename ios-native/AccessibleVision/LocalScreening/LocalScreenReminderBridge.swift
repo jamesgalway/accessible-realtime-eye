@@ -226,13 +226,16 @@ final class LocalScreenReminderBridge {
           const decision = String(nativeResult.modelText || '').trim();
           if (!['Y','N'].includes(decision)) throw new Error('本地筛图未返回有效的是或否');
           const localModel = nativeResult.model === 'MiniCPM-V-4.7-1B' ? nativeResult.model : 'MiniCPM-V-4.7-35B-A3B';
+          const modelLayers = globalThis.HuiyanModelLayers?.localPlan(voice, localModel);
+          if (modelLayers) reminder.modelLayers = modelLayers;
+          const localReviewEndpoint = modelLayers?.application.endpoints.localReview || '/api/active-reminder-local-describe';
           const descriptionStart = performance.now();
           // Only a positive screen invokes Ali for full contract review and description.
           // The chosen Live voice receives the original application result; no Google Lite
           // or prepare round trip is needed. The original server compiler,
           // state/instance parser and application delivery lifecycle stay intact.
           const result = decision === 'Y'
-            ? await jsonPost('/api/active-reminder-local-describe', {...body,localDecision:'Y',localScreenLatencyMs:nativeResult.modelLatencyMs,localScreenModel:localModel})
+            ? await jsonPost(localReviewEndpoint, {...body,localDecision:'Y',localScreenLatencyMs:nativeResult.modelLatencyMs,localScreenModel:localModel})
             : await jsonPost('/api/active-reminder-direct-finalize', {...body,modelText:'N',
               modelLatencyMs:nativeResult.modelLatencyMs,modelProvider:localModel === 'MiniCPM-V-4.7-1B' ? 'local-minicpm1b' : 'local-minicpm35b'});
           if (controller.signal.aborted || !owns()) throw new Error('本地筛图结果已过期');
