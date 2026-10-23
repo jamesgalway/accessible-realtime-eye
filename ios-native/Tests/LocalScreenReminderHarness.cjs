@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync('ios-native/AccessibleVision/LocalScreening/LocalScreenReminderBridge.swift', 'utf8').split('static let script = #"""')[1].split('"""#')[0];
-function create({ backend = 'aliyun', section = 'assistant', transport = 'aliyun-realtime',configTransport='browser-direct',modelReply } = {}) {
+function create({ backend = 'aliyun', section = 'assistant', transport = 'aliyun-realtime',configTransport='browser-direct',modelReply,reviewReply } = {}) {
   const liveCalls = [];
   const posts = [], http = [], timers = new Map(), intervals = new Map(), delays=[], events = [], modelCalls=[];
   const context = { URL, Response, AbortController, performance, console, appState:{geminiReminder:{transport}},
@@ -18,6 +18,7 @@ function create({ backend = 'aliyun', section = 'assistant', transport = 'aliyun
   context.fetch = async (path, init={}) => {
     http.push({path:String(path),body:init.body && JSON.parse(init.body)});
     if(String(path).includes('/api/gemini-browser-config')) return new Response(JSON.stringify({transport:configTransport,model:'google-live',voice:'existing-voice',apiKey:'private-test-only'}));
+    if(String(path).endsWith('-local-describe') && reviewReply) return new Response(JSON.stringify(await reviewReply(JSON.parse(init.body))));
     return new Response(JSON.stringify(String(path).endsWith('-prepare')?{prompt:'original contract prompt',model:'google-review',jsonMode:true,timeoutMs:3500,maxOutputTokens:160}:
       {ok:true,shouldAlert:true,state:'HIT',provider:'local-minicpm35b',transport:'native-local-minicpm35b'}),{status:200});
   };
@@ -158,37 +159,46 @@ function decisionTurn(outcome = 'accepted', late = false) {
     g.http.length=0;
     const p=g.context.fetch('/api/active-reminder-check',options());await tick();
     g.context.__huiyanLocalScreenReply({id:g.posts.find(x=>x.type==='screen').id,model:'MiniCPM-V-4.7-1B',modelText:decision,modelLatencyMs:410,withinBudget:true});await p;
-    assert.equal(g.modelCalls.length,decision==='Y'?1:0);
+    assert.equal(g.modelCalls.length,0,'Google Lite is not part of the new review route');
     assert.equal(g.liveCalls.length,0);
-    assert.ok(!g.http.some(x=>x.path==='/api/active-reminder-local-describe'||x.path==='/api/active-reminder-check'));
+    assert.ok(!g.http.some(x=>x.path==='/api/active-reminder-direct-prepare'||x.path==='/api/active-reminder-check'));
     if(decision==='Y') {
-      assert.deepEqual(g.http.map(x=>x.path),['/api/active-reminder-direct-prepare','/api/active-reminder-direct-finalize']);
-      assert.equal(g.http[0].body.modelProvider,'local-minicpm1b-google');assert.equal(g.http[1].body.modelProvider,'local-minicpm1b-google');
-      assert.equal(g.modelCalls[0].model,'google-review');assert.equal(g.modelCalls[0].contents[0].parts[0].text,'original contract prompt');
-      assert.equal(g.modelCalls[0].contents[0].parts[1].inlineData.data,'AA==');assert.ok(g.delays.includes(3500));
+      assert.deepEqual(g.http.map(x=>x.path),['/api/active-reminder-local-describe']);
+      assert.equal(g.http[0].body.localDecision,'Y');assert.equal(g.http[0].body.localScreenModel,'MiniCPM-V-4.7-1B');
+      assert.equal(g.http[0].body.imageDataUrl,body.imageDataUrl);assert.equal(g.http[0].body.task,body.task);
     }
     const event=g.events.find(x=>x[0]==='local_screening.result')[1];assert.equal(event.voice,'google');assert.equal(event.liveTransport,'browser-direct');
   }
   const proxy=create({transport:'server-proxy',configTransport:'server-proxy'});proxy.context.__huiyanSetLocalScreenEnabled(true,'google');
   await assert.rejects(proxy.context.fetch('/api/gemini-browser-config'),/手机直连/);assert.equal(proxy.modelCalls.length,0);
   let finishReview;
-  const staleGoogle=create({transport:'browser-direct',modelReply:()=>new Promise(resolve=>{finishReview=resolve;})});
+  const staleGoogle=create({transport:'browser-direct',reviewReply:()=>new Promise(resolve=>{finishReview=resolve;})});
   staleGoogle.context.__huiyanSetLocalScreenEnabled(true,'google');
   const oldGoogle=staleGoogle.context.fetch('/api/active-reminder-check',options());const oldRejected=assert.rejects(oldGoogle,/过期|超时/);await tick();
   staleGoogle.context.__huiyanLocalScreenReply({id:staleGoogle.posts.find(x=>x.type==='screen').id,model:'MiniCPM-V-4.7-1B',modelText:'Y',withinBudget:true});await tick();
   staleGoogle.context.appState.geminiReminder.activeTaskSeq=2;
-  finishReview({text:'old result'});await oldRejected;
+  finishReview({shouldAlert:true,observation:'old result'});await oldRejected;
   assert.equal(staleGoogle.http.filter(x=>x.path.endsWith('-finalize')).length,0);
-  const cloudFailure=create({transport:'browser-direct',modelReply:async()=>{throw new Error('review unavailable 503');}});
+  const cloudFailure=create({transport:'browser-direct',reviewReply:async()=>{throw new Error('review unavailable 503');}});
   cloudFailure.context.__huiyanSetLocalScreenEnabled(true,'google');
   const unavailable=cloudFailure.context.fetch('/api/active-reminder-check',options());
   const unavailableCheck=assert.rejects(unavailable,/503/);await tick();
   cloudFailure.context.__huiyanLocalScreenReply({id:cloudFailure.posts.find(x=>x.type==='screen').id,model:'MiniCPM-V-4.7-1B',modelText:'Y',withinBudget:true});
   await unavailableCheck;
-  assert.equal(cloudFailure.liveCalls.length,0);assert.equal(cloudFailure.modelCalls.length,1);
-  assert.equal(cloudFailure.http.filter(x=>x.path.endsWith('-finalize')||x.path.endsWith('-local-describe')).length,0);
+  assert.equal(cloudFailure.liveCalls.length,0);assert.equal(cloudFailure.modelCalls.length,0);
+  assert.equal(cloudFailure.http.filter(x=>x.path.endsWith('-finalize')).length,0);
+  assert.equal(cloudFailure.http.filter(x=>x.path.endsWith('-local-describe')).length,1);
   assert.equal(cloudFailure.timers.size,0);assert.equal(cloudFailure.intervals.size,0);
-  console.log('PASS: Ali decision audio isolation, four contracts, 1B-triggered Google direct Lite review, zero Live review/Ali calls, N skips model, stale result isolation.');
+  for(const [category,mode] of [['target_presence','appear'],['state_tracking','result_reached'],['state_tracking','state_changed']]) {
+    const g=create({transport:'browser-direct',reviewReply:async()=>({shouldAlert:false,state:'NO_HIT'})});
+    g.context.__huiyanSetLocalScreenEnabled(true,'google');
+    const task=`category=${category};mode=${mode};lifecycle=once;target=fixture;condition=full-condition;speakText=ready`;
+    const p=g.context.fetch('/api/active-reminder-check',{...options(),body:JSON.stringify({...body,task})});await tick();
+    g.context.__huiyanLocalScreenReply({id:g.posts.find(x=>x.type==='screen').id,model:'MiniCPM-V-4.7-1B',modelText:'Y',withinBudget:true});
+    assert.equal((await (await p).json()).shouldAlert,false,'Ali can reject a local false positive');
+    assert.equal(g.http[0].body.task,task);assert.equal(g.modelCalls.length,0);assert.equal(g.liveCalls.length,0);
+  }
+  console.log('PASS: Ali confirmation isolation, four contracts, 1B to Ali full review with Google voice, no Google Lite/prepare, N skips model, stale and failed review isolation.');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 
 assert.doesNotMatch(fs.readFileSync('ios-native/AccessibleVision/Views/GreenCloudWebView.swift','utf8'), /WKUserScript\(source:LocalScreenConditionalLive\.script/);
