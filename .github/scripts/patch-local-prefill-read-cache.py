@@ -1,4 +1,4 @@
-"""Byte-preserving, offline-only prefill read cache in the pinned MoE engine."""
+"""Byte-preserving prefill read cache for the isolated 35B experiment."""
 from pathlib import Path
 import hashlib,json,shutil,sys
 
@@ -63,6 +63,6 @@ header=root/'src/huiyan-prefill-read-cache.h';shutil.copyfile(scripts/header.nam
 result={'version':'prefill-read-cache-v1','engineCommit':'96bbf61710d44421ea54e63f5194f9b17c20d877',
         'files':{'src/llama-moe-slot.cpp':{'before':hashlib.sha256(before).hexdigest(),'after':hashlib.sha256(after).hexdigest()},
                  'src/'+header.name:{'after':hashlib.sha256(header.read_bytes()).hexdigest()}},
-        'scope':'Immutable weight bytes only; all routed experts retained; enabled only by explicit offline experiment environment.'}
+        'scope':'Immutable weight bytes only; all routed experts retained; enabled only by explicit experiment environment.'}
 Path(sys.argv[2]).write_text(json.dumps(result,indent=2)+'\n',encoding='utf-8')
 print('Applied optional byte-preserving prefill read cache.')
