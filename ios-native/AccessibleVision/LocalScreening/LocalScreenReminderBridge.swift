@@ -84,8 +84,8 @@ final class LocalScreenReminderBridge {
       let selectedVoice = 'aliyun';
       window.__huiyanSetLocalScreenEnabled = (value, voice = 'aliyun') => {
         enabled = value === true;
-        selectedVoice = ['google','googleLocal'].includes(voice) ? voice : 'aliyun';
-        window.__huiyanConditionalLiveSelect?.(enabled && selectedVoice !== 'aliyun', selectedVoice === 'googleLocal');
+        selectedVoice = voice === 'google' ? 'google' : 'aliyun';
+        window.__huiyanConditionalLiveSelect?.(enabled && selectedVoice === 'google');
       };
       window.__huiyanLocalScreenReply = reply => {
         const entry = pending.get(reply.id);
@@ -97,6 +97,69 @@ final class LocalScreenReminderBridge {
       const log = (event, detail) => {
         if (typeof logClientEvent === 'function') logClientEvent(event, detail);
       };
+      // A contract decision may speak before submitting its tool. Hold only this
+      // local Ali decision turn until the existing tool/recovery path settles.
+      // Ordinary answers are released unchanged; accepted contracts use the one
+      // existing confirmation. No extra classification or model request.
+      if (typeof handleRealtimeServerEvent === 'function'
+          && typeof startSpeedReminderTaskNormalizeFromConfirmation === 'function') {
+        const originalEvent = handleRealtimeServerEvent;
+        const originalNormalize = startSpeedReminderTaskNormalizeFromConfirmation;
+        let staged = null, recovering = null;
+        const valid = q => q && enabled && selectedVoice === 'aliyun'
+          && appState.realtime === q.realtime && appState.activeReminder === q.reminder
+          && q.realtime.aliCheapContractCandidateSeq === q.seq
+          && q.reminder.activeTaskSeq === q.taskSeq;
+        const release = async q => {
+          if (!valid(q)) return;
+          log('local_screening.ali_decision_released',{candidateSeq:q.seq,events:q.messages.length});
+          for (const message of q.messages) {
+            if (!valid(q)) break;
+            await originalEvent(message);
+          }
+        };
+        startSpeedReminderTaskNormalizeFromConfirmation = async function(input, output, options = {}) {
+          const q = options.confirmOnAccepted ? recovering : null;
+          if (q) recovering = null;
+          const accepted = await originalNormalize(input, output, options);
+          if (q && !accepted) await release(q);
+          if (q && accepted) log('local_screening.ali_decision_discarded',{candidateSeq:q.seq,reason:'recovered_contract'});
+          return accepted;
+        };
+        handleRealtimeServerEvent = async function(message) {
+          if (staged && !valid(staged)) staged = null;
+          if (recovering && !valid(recovering)) recovering = null;
+          if (['proxy.error','proxy.closed'].includes(message.type)) { staged = null; recovering = null; }
+          const r = appState.activeReminder, rt = appState.realtime;
+          const decision = enabled && selectedVoice === 'aliyun'
+            && isAliCheapDirectFunctionContractExperiment()
+            && r?.pendingTaskSetupTranscript && !rt?.aliCheapContractConfirmationInFlight;
+          const output = ['response.audio.delta','response.audio_transcript.delta','response.audio_transcript.done',
+            'response.text.delta','response.text.done','response.audio.done'].includes(message.type);
+          if (decision && output) {
+            staged ||= {realtime:rt,reminder:r,seq:rt.aliCheapContractCandidateSeq,
+              taskSeq:r.activeTaskSeq,messages:[]};
+            staged.messages.push(message);
+            return;
+          }
+          if (message.type === 'response.function_call_arguments.done') {
+            const result = await originalEvent(message);
+            if (staged && rt?.pendingAliCheapToolResult) {
+              log('local_screening.ali_decision_discarded',{candidateSeq:staged.seq,reason:'contract_tool'});
+              staged = null;
+            }
+            return result;
+          }
+          if (message.type === 'response.done' && staged) {
+            const q = staged; staged = null;
+            if (valid(q) && !rt?.pendingAliCheapToolResult
+                && hasGeminiActiveReminderIntent(r.pendingTaskSetupTranscript, '')) {
+              q.messages.push(message); recovering = q;
+            } else if (!rt?.pendingAliCheapToolResult) await release(q);
+          }
+          return originalEvent(message);
+        };
+      }
       window.fetch = async (input, init = {}) => {
         const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url, location.href);
         if (enabled && selectedVoice !== 'aliyun' && url.origin === location.origin && url.pathname === '/api/gemini-browser-config') {
@@ -151,11 +214,6 @@ final class LocalScreenReminderBridge {
               ? '核验可观察性：当前图能可靠观察以下状态维度：' + fields[5]
               : '核验条件：' + fields[5])
             : '核验条件：' + body.task;
-          if (voice === 'googleLocal') {
-            const prepared = await jsonPost('/api/active-reminder-direct-prepare',{...body,modelProvider:'local-minicpm1b'});
-            if (!prepared.prompt || !owns() || controller.signal.aborted) throw new Error('本地完整筛图合同已过期或不完整。');
-            prompt = prepared.prompt;
-          }
           if (controller.signal.aborted) throw new Error('本地筛图超过20秒或已经取消');
           const nativeResult = await new Promise((resolve,reject) => {
             const onAbort = () => { pending.delete(id); reject(new Error('本地筛图超过20秒或已经取消')); };
@@ -166,17 +224,6 @@ final class LocalScreenReminderBridge {
           });
           if (!nativeResult.withinBudget || controller.signal.aborted || !owns()) throw new Error('本地筛图超过20秒或已经取消');
           const decision = String(nativeResult.modelText || '').trim();
-          if (voice === 'googleLocal') {
-            const parsed = JSON.parse(decision);
-            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('本地完整筛图未返回有效JSON对象。');
-            const result = await jsonPost('/api/active-reminder-direct-finalize',{...body,
-              modelText:decision,modelLatencyMs:nativeResult.modelLatencyMs,modelProvider:'local-minicpm1b'});
-            if (!owns() || controller.signal.aborted) throw new Error('本地完整筛图结果已过期。');
-            log('local_screening.result',{frameCount:body.frameCount,task:body.task,voice,model:nativeResult.model,
-              localScreenLatencyMs:nativeResult.modelLatencyMs,latencyMs:performance.now()-start,
-              state:result.state,shouldAlert:result.shouldAlert,transport:'native-local-1b-authority'});
-            return new Response(JSON.stringify({...result,localAuthority:true}),{status:200,headers:{'Content-Type':'application/json'}});
-          }
           if (!['Y','N'].includes(decision)) throw new Error('本地筛图未返回有效的是或否');
           const localModel = nativeResult.model === 'MiniCPM-V-4.7-1B' ? nativeResult.model : 'MiniCPM-V-4.7-35B-A3B';
           const descriptionStart = performance.now();

@@ -35,7 +35,52 @@ function create({ backend = 'aliyun', section = 'assistant', transport = 'aliyun
 const tick = () => new Promise(resolve=>setImmediate(resolve));
 const body = {task:'category=target_presence;mode=appear;lifecycle=once;target=authorized-subject;condition=authorized-condition;speakText=authorized-result',imageDataUrl:'data:image/jpeg;base64,AA==',promptMode:'deep_multitask',frameCount:1};
 const options = () => ({method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+function decisionTurn(outcome = 'accepted') {
+  const played=[], forwarded=[]; let resolveRecovery;
+  const r={pendingTaskSetupTranscript:'authorized reminder',activeTaskSeq:1};
+  const rt={aliCheapContractCandidateSeq:1};
+  const c={URL,Response,AbortController,performance,console,appState:{activeReminder:r,realtime:rt},
+    location:{href:'https://example.test/',origin:'https://example.test',pathname:'/'},
+    __ACCESSIBLE_VISION_BACKEND__:'aliyun',__ACCESSIBLE_VISION_SECTION__:'assistant',
+    webkit:{messageHandlers:{nativeLocalScreen:{postMessage(){}}}},fetch:async()=>{},
+    isAliCheapDirectFunctionContractExperiment:()=>true,hasGeminiActiveReminderIntent:()=>outcome!=='ordinary',
+    handleRealtimeServerEvent:async m=>{
+      forwarded.push(m.type);
+      if(m.type==='response.audio.delta') played.push(m.delta);
+      if(m.type==='response.function_call_arguments.done') {
+        rt.pendingAliCheapToolResult={accepted:true};r.pendingTaskSetupTranscript='';
+        rt.aliCheapContractConfirmationInFlight=true;
+      }
+      if(m.type==='response.done' && r.pendingTaskSetupTranscript) {
+        r.pendingTaskSetupTranscript='';
+        if(outcome!=='ordinary') void c.startSpeedReminderTaskNormalizeFromConfirmation('request','',{confirmOnAccepted:true});
+      }
+    },
+    startSpeedReminderTaskNormalizeFromConfirmation:async()=>{
+      const accepted = await new Promise(resolve=>{resolveRecovery=resolve;});
+      if(accepted) { r.activeTaskSeq++;played.push('accepted confirmation'); }
+      return accepted;
+    }};
+  c.window=c;vm.runInNewContext(source,c);c.__huiyanSetLocalScreenEnabled(true);
+  return {c,r,rt,played,forwarded,finish:value=>resolveRecovery(value),
+    send:(type,delta)=>c.handleRealtimeServerEvent({type,delta})};
+}
 (async()=>{
+  const accepted=decisionTurn();
+  await accepted.send('response.audio.delta','premature question');assert.deepEqual(accepted.played,[]);
+  await accepted.send('response.audio.done');await accepted.send('response.done');assert.deepEqual(accepted.played,[]);
+  accepted.finish(true);await tick();assert.deepEqual(accepted.played,['accepted confirmation']);
+  const noTask=decisionTurn('none');await noTask.send('response.audio.delta','original answer');
+  await noTask.send('response.done');noTask.finish(false);await tick();assert.deepEqual(noTask.played,['original answer']);
+  const ordinary=decisionTurn('ordinary');await ordinary.send('response.audio.delta','ordinary answer');
+  await ordinary.send('response.done');assert.deepEqual(ordinary.played,['ordinary answer']);
+  const tool=decisionTurn();await tool.send('response.audio.delta','before tool');
+  await tool.send('response.function_call_arguments.done');await tool.send('response.done');
+  await tool.send('response.audio.delta','tool accepted confirmation');assert.deepEqual(tool.played,['tool accepted confirmation']);
+  const replaced=decisionTurn();await replaced.send('response.audio.delta','old');await replaced.send('response.done');
+  replaced.rt.aliCheapContractCandidateSeq++;replaced.finish(false);await tick();assert.deepEqual(replaced.played,[]);
+  const switched=decisionTurn();await switched.send('response.audio.delta','old');
+  switched.c.__huiyanSetLocalScreenEnabled(false);await switched.send('response.done');assert.deepEqual(switched.played,[]);
   for (const config of [{backend:'greenCloud'},{section:'teaching'}]) {
     const r=create(config);assert.equal(r.context.__huiyanLocalScreenInstalled,undefined);
   }
@@ -125,13 +170,5 @@ const options = () => ({method:'POST',headers:{'Content-Type':'application/json'
   staleGoogle.context.appState.geminiReminder.activeTaskSeq=2;
   finishReview({text:'old result'});await oldRejected;
   assert.equal(staleGoogle.http.filter(x=>x.path.endsWith('-finalize')).length,0);
-  const full=create({transport:'browser-direct'});full.context.__huiyanSetLocalScreenEnabled(true,'googleLocal');
-  const fp=full.context.fetch('/api/active-reminder-check',options());await tick();
-  const request=full.posts.find(x=>x.type==='screen');assert.ok(request);assert.equal(request.prompt,'original contract prompt');
-  full.context.__huiyanLocalScreenReply({id:request.id,model:'MiniCPM-V-4.7-1B',modelText:'{"state":"HIT","observation":"真实局部状态"}',withinBudget:true});
-  assert.equal((await (await fp).json()).localAuthority,true);
-  assert.deepEqual(full.http.map(x=>x.path),['/api/active-reminder-direct-prepare','/api/active-reminder-direct-finalize']);
-  assert.equal(full.modelCalls.length,0);assert.equal(full.liveCalls.length,0);
-  assert.equal(full.http[1].body.modelProvider,'local-minicpm1b');assert.equal(full.http[1].body.imageDataUrl,body.imageDataUrl);
   console.log('PASS: four original contracts, Ali unchanged, 1B Google same-frame Live delegation, zero Lite/Ali calls, N skips model, direct-only config, stale result isolation.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

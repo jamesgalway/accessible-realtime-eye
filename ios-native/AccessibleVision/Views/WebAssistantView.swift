@@ -120,10 +120,6 @@ struct WebAssistantView: View {
                 .padding(.bottom, 8)
                 if !assistantEntries.status.isEmpty { Text(assistantEntries.status) }
                 if selectedBackend == .aliyun {
-                    Toggle("35B提速缓存实验", isOn: $localScreen.prefillReadCacheEnabled)
-                        .disabled(localScreenStarting || localScreen.loaded)
-                        .accessibilityHint("关闭本地主动提醒后可切换，用于和原方案对照。")
-                        .padding(.horizontal, 16)
                     Button(localScreen.localReminders && localScreen.profile == .moe35b ? "本地主动提醒已启用" : "本地主动提醒（阿里声音）") {
                         localScreenStarting = true
                         localScreenStatus = "正在准备本地主动提醒。"
@@ -138,20 +134,6 @@ struct WebAssistantView: View {
                     }
                     .disabled(localScreenStarting || localScreen.localReminders || screenSharingMode)
                     .buttonStyle(.borderedProminent)
-                    Button(localScreen.localReminders && localScreen.profile == .dense1b && localScreen.reminderVoice == .aliyun ? "1B本地主动提醒已启用" : "1B本地主动提醒（阿里声音）") {
-                        localScreenStarting = true
-                        localScreenStatus = "正在准备1B本地主动提醒。"
-                        Task {
-                            defer { localScreenStarting = false }
-                            do {
-                                try await localScreen.enableReminders(profile:.dense1b)
-                                localScreenStatus = "1B实验已启用，可以说提醒条件。"
-                                openAssistant(.unified)
-                            } catch { localScreenStatus = error.localizedDescription }
-                        }
-                    }
-                    .disabled(localScreenStarting || localScreen.localReminders || screenSharingMode)
-                    .buttonStyle(.borderedProminent)
                     Button(localScreen.localReminders && localScreen.profile == .dense1b && localScreen.reminderVoice == .google ? "1B谷歌直连声音已启用" : "1B本地主动提醒（谷歌直连声音）") {
                         localScreenStarting = true
                         localScreenStatus = "正在准备1B谷歌直连声音实验。"
@@ -160,20 +142,6 @@ struct WebAssistantView: View {
                             do {
                                 try await localScreen.enableReminders(profile:.dense1b, voice:.google)
                                 localScreenStatus = "1B筛图已启用，由谷歌直连Live看图判断并播报。"
-                                openAssistant(.googleVoice)
-                            } catch { localScreenStatus = error.localizedDescription }
-                        }
-                    }
-                    .disabled(localScreenStarting || localScreen.localReminders || screenSharingMode)
-                    .buttonStyle(.borderedProminent)
-                    Button(localScreen.localReminders && localScreen.reminderVoice == .googleLocal ? "1B独立筛图谷歌播报已启用" : "1B独立筛图（谷歌只播报实验）") {
-                        localScreenStarting = true
-                        localScreenStatus = "正在准备1B独立筛图实验。"
-                        Task {
-                            defer { localScreenStarting = false }
-                            do {
-                                try await localScreen.enableReminders(profile:.dense1b, voice:.googleLocal)
-                                localScreenStatus = "1B独立筛图，应用判断是否触发，谷歌直连Live结合当前画面播报。"
                                 openAssistant(.googleVoice)
                             } catch { localScreenStatus = error.localizedDescription }
                         }

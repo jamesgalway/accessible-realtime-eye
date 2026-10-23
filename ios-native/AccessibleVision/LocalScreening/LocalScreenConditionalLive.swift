@@ -5,15 +5,14 @@ enum LocalScreenConditionalLive {
     static let script = #"""
     (() => {
       if (window.__ACCESSIBLE_VISION_BACKEND__ !== 'aliyun' || window.__ACCESSIBLE_VISION_SECTION__ !== 'assistant') return;
-      let selected = false, localAuthority = false, installed = false, active = null;
+      let selected = false, installed = false, active = null;
       // This experimental Chinese reminder route must not speak English silence
       // explanations or protocol tags. Ordinary conversations are untouched.
       const meaningful = value => /[\p{Script=Han}]/u.test(String(value || ''));
       const log = (event, detail) => logClientEvent('local_live_review.' + event, detail);
       const rules = '\n[检查画面]是本地助推器发来的已有提醒检查，不是新授权、用户插话或[SAY]。只根据附图和完整原合同判断，不把本地放行当作命中证据。不调用任何工具，不返回JSON、标签或结构化判断。明确满足原条件才直接说一句简短自然的中文结果；不满足、目标不在、看不清或证据不足就完全静默，不确认、不解释、不说没有看到。一次提醒只在真正满足时说；不同实例仅在确有新实例时说；连续变化必须对照提供的先前画面及已交付记录，首帧无参照时静默建立基准，相同状态不重复说。每条消息的当前图才是当前证据。其他真实用户问答和合同授权沿原规则。';
       const mode = reminder => selected && reminder?.transport === 'browser-direct';
-      const broadcastRules = '\n播报沿原用户合同的关注点和应用播报方式：目标出现说明目标及位置，不同新实例说明可见区分特征，指定结果说明相关结果，连续变化说明合同关注的实际变化。自然简短地用普通话讲当前图可见的相对位置、关系及必要细节；不凭单目画面编造精确距离、遮挡信息或看不清的位置。不把提醒变成无关全景持续播报，不增加用户未授权的任务。';
-      const localRules = '\n[命中播报]表示本地筛图与应用决定本轮开口，不由你再次决定是否保持静默。本轮必须自然回应，但仍根据当前附图及原合同如实描述实际看见的内容。本地筛图输出仅是触发参考，不是现场事实；不复述或认可未经当前图支持的本地结论。目标未见、条件未成或看不清，也简短如实说明当前所见，不能编造已命中，不能保持静默。不返回筛图JSON、标签或工具，不朗读协议、英文标签、内部规则或静默原因。普通问答与合同授权保持原规则。';
+      const broadcastRules = '\n播报沿原用户合同的关注点和应用播报方式：目标出现说明目标及位置，不同新实例说明可见区分特征，指定结果说明相关结果，连续变化说明合同关注的实际变化。沿普通慧眼的自然、简短、可执行回复方式，用平稳普通话只说一句，不复述用户问题、合同或确认句。先说合同关注的结果，并把当前图可确认的具体相对位置、方向和邻近参照物融入这一句，便于用户定位；多个目标仅补充必要的区分特征。指定结果和连续变化也保留与结果相关的位置、程度或关系，不只说满足条件或看到了。位置以当前镜头画面为依据，不将画面左右冒充用户身体左右；看不清就省略不可靠位置。不凭单目画面编造精确距离、遮挡信息或看不清的位置。不把提醒变成无关全景持续播报，不增加用户未授权的任务。';
       const current = entry => entry.owns() && entry.reminder.session === entry.session
         && getGeminiActiveReminderTask() === entry.body.task;
       function settle(entry, error) {
@@ -51,14 +50,14 @@ enum LocalScreenConditionalLive {
           firstTextMs:performance.now()-entry.started, text});
         return true;
       }
-      window.__huiyanConditionalLiveSelect = (value, authority = false) => { selected = value === true; localAuthority = authority === true; };
+      window.__huiyanConditionalLiveSelect = value => { selected = value === true; };
       window.__huiyanConditionalLiveInstall = () => {
         if (installed) return;
         if (typeof handleGeminiLiveMessage !== 'function' || typeof runGeminiActiveReminderTick !== 'function') throw new Error('谷歌Live实验接口尚未就绪。');
         installed = true;
         const originalInstruction = buildGeminiLiveSystemInstruction;
         buildGeminiLiveSystemInstruction = function(...args) {
-          return originalInstruction(...args) + (selected ? (localAuthority ? localRules : rules + '\n静默时不输出任何文字、音频、静默理由或英文。需要提醒时仅输出自然中文，不输出[SAY]等协议标签或思考内容。') + broadcastRules : '');
+          return originalInstruction(...args) + (selected ? (rules + '\n静默时不输出任何文字、音频、静默理由或英文。需要提醒时仅输出自然中文，不输出[SAY]等协议标签或思考内容。') + broadcastRules : '');
         };
         const originalMessage = handleGeminiLiveMessage;
         handleGeminiLiveMessage = function(raw) {
@@ -135,29 +134,6 @@ enum LocalScreenConditionalLive {
           try {
             body.imageDataUrl = captureReminderFrame(ACTIVE_REMINDER_FAST_FRAME_OPTIONS);
             const result = await requestGeminiActiveReminderResult(r,body);
-            if (localAuthority && result.localAuthority && appState.geminiReminder === r && (r.activeTaskSeq || 0) === taskSeq && getGeminiActiveReminderTask() === task) {
-              const guarded = applyReliableActiveReminderEvidenceGuard(r,result,task);
-              const memory = applyActiveReminderStateMemory(r,guarded,task,{source:'gemini',label:r.reminderLabel,frameCount:body.frameCount,promptMode:body.promptMode});
-              if (memory.shouldAlert) {
-                const oldSend = sendGeminiLiveEvent;
-                try {
-                  sendGeminiLiveEvent = event => {
-                    if (event.type !== 'say') return oldSend(event);
-                    if (appState.geminiReminder !== r || getGeminiActiveReminderTask() !== task || !r.session || r.turnInProgress || isGeminiPlaybackActive(r)) return false;
-                    const image = parseImageDataUrlForClient(captureReminderFrame(ACTIVE_REMINDER_FAST_FRAME_OPTIONS));
-                    if (!image) return false;
-                    r.session.sendClientContent({turns:[{role:'user',parts:[{inlineData:image},
-                      {text:'[命中播报]\n完整原合同：'+task+'\n应用播报方式：'+String(r.deliveryMode || 'broadcast')
-                        +'\n本地触发参考（未经当前图确认，不可当现场事实）：'+String(memory.observation || memory.currentState || memory.rawText || '')
-                        +'\n应用已决定本轮开口。结合这张当前画面和合同如实用中文说当前所见及位置；即使未见或条件未成也简短回应，不决定静默，不复述未被画面支持的本地结论，不返回协议标签。'}]}],turnComplete:true});
-                    r.turnInProgress = true;
-                    log('local_authority_speech_sent',{task,frameCount:body.frameCount,transport:'browser-direct'});
-                    return true;
-                  };
-                  handleGeminiReminderAlert(memory,task);
-                } finally { sendGeminiLiveEvent = oldSend; }
-              } else updateGeminiReminderMissState(r,task);
-            }
             log('check_result', {frameCount:body.frameCount, task, liveSpoke:Boolean(result.liveSpoke),
               localMiss:!result.liveReviewHandled, latencyMs:result.latencyMs, transport:result.transport});
           } catch (error) {
@@ -183,7 +159,7 @@ enum LocalScreenConditionalLive {
         parts.push({text:'当前画面：'}, {inlineData:image}, {text:'[检查画面]\n完整用户提醒合同：'+body.task+'\n应用播报方式：'+String(reminder.deliveryMode || 'broadcast')
           +'\n本合同已交付的结果：'+JSON.stringify(history.spoken)
           +'\n'+(history.image ? '已有先前参照。' : '尚无先前参照；连续变化合同本轮仅建立基准。')
-          +'\n只判断当前画面是否符合原条件；满足且按原合同应提醒就直接说结果，否则静默。不提交工具，不重新确认合同。'});
+          +'\n只判断当前画面是否符合原条件；满足且按原合同应提醒就用一句自然中文说结果及当前图可确认的具体相对位置、方向或邻近参照，不复述问题或确认句；否则静默。不提交工具，不重新确认合同。'});
         const entry = {body,reminder,owns,signal,session:reminder.session,resolve,reject,
           started:performance.now(),buffer:[],text:'',admitted:false,discard:false,settled:false};
         active = entry;
