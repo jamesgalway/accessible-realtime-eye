@@ -63,7 +63,8 @@ function create() {
   await authority.c.runGeminiActiveReminderTick();
   assert.equal(memoryCalls,1);assert.equal(alertCalls,1);assert.equal(authority.sent.length,1);
   assert.ok(JSON.stringify(authority.sent).includes('[命中播报]'));assert.ok(!JSON.stringify(authority.sent).includes('[检查画面]'));
-  assert.equal(authority.c.sendGeminiLiveEvent,originalSend);assert.match(authority.c.buildGeminiLiveSystemInstruction(),/无需再检查条件/);
+  assert.equal(authority.c.sendGeminiLiveEvent,originalSend);assert.match(authority.c.buildGeminiLiveSystemInstruction(),/本轮必须自然回应/);
+  assert.match(authority.c.buildGeminiLiveSystemInstruction(),/不同新实例/);assert.match(authority.c.buildGeminiLiveSystemInstruction(),/不能编造已命中/);
   failure.c.__huiyanConditionalLiveSelect(false);await failure.c.runGeminiActiveReminderTick();assert.equal(failure.baseTicks,1);
   assert.equal(failure.c.buildGeminiLiveSystemInstruction(),'original contract rules');
   console.log('PASS conditional Live: empty/format-only audio gate, ordered streaming, duplicate/stale/abort/input isolation, ordinary speech restored, timeout closes, tick release, old routes unchanged.');
