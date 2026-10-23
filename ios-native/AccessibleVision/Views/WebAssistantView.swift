@@ -120,6 +120,10 @@ struct WebAssistantView: View {
                 .padding(.bottom, 8)
                 if !assistantEntries.status.isEmpty { Text(assistantEntries.status) }
                 if selectedBackend == .aliyun {
+                    Toggle("35B提速缓存实验", isOn: $localScreen.prefillReadCacheEnabled)
+                        .disabled(localScreenStarting || localScreen.loaded)
+                        .accessibilityHint("关闭本地主动提醒后可切换，用于和原方案对照。")
+                        .padding(.horizontal, 16)
                     Button(localScreen.localReminders && localScreen.profile == .moe35b ? "本地主动提醒已启用" : "本地主动提醒（阿里声音）") {
                         localScreenStarting = true
                         localScreenStatus = "正在准备本地主动提醒。"

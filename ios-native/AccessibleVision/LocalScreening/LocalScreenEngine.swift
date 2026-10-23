@@ -84,7 +84,7 @@ final class LocalScreenEngine: @unchecked Sendable {
         }
     }
 
-    func load(directory: URL, profile: LocalScreenProfile = .moe35b) async throws -> Double {
+    func load(directory: URL, profile: LocalScreenProfile = .moe35b, useReadCache: Bool = true) async throws -> Double {
         let token = nextRevision()
         return try await withCheckedThrowingContinuation { continuation in
             queue.async { [self] in
@@ -115,11 +115,12 @@ final class LocalScreenEngine: @unchecked Sendable {
                     let reserve: Int64 = 2440 * 1_048_576
                     let affordable = max(0, Int((headroom - reserve) / slotBytes))
                     cacheSlots = profile == .dense1b ? 0 : min(32, max(0, affordable - 8) / 8 * 8)
-                    // Offline-only experiment: replace the unused prefill-time
-                    // decode windows with a smaller immutable CPU byte cache.
-                    // Normal entries keep the installed batching/LES defaults.
-                    let readCacheRequested = profile == .moe35b && ProcessInfo.processInfo.arguments.contains("-huiyanLocalScreenBenchmark")
-                        && ProcessInfo.processInfo.arguments.contains("-huiyan35bPrefillReadCache")
+                    // Replace decode windows with an immutable byte cache for
+                    // the isolated 35B experiment. Offline baseline remains
+                    // opt-out by default for comparisons in the same build.
+                    let offline = ProcessInfo.processInfo.arguments.contains("-huiyanLocalScreenBenchmark")
+                    let readCacheRequested = profile == .moe35b && (offline
+                        ? ProcessInfo.processInfo.arguments.contains("-huiyan35bPrefillReadCache") : useReadCache)
                     let readCacheSlots = readCacheRequested ? cacheSlots : 0
                     if readCacheRequested { cacheSlots = 0 }
                     setenv("HUIYAN_MOE_PREFILL_READ_CACHE", String(readCacheSlots), 1)

@@ -13,6 +13,7 @@ final class LocalScreenLab: ObservableObject {
     @Published private(set) var localReminders = false
     @Published private(set) var profile = LocalScreenProfile.moe35b
     @Published private(set) var reminderVoice = LocalReminderVoice.aliyun
+    @Published var prefillReadCacheEnabled = true
     private let engine = LocalScreenEngine()
     private var revision = 0
     private var applicationActive = true
@@ -40,7 +41,7 @@ final class LocalScreenLab: ObservableObject {
             status = "正在加载本地主动提醒模型。"
             record(["event":"model_load_started","availableBytes":huiyan_local_available_memory(),"footprintBytes":huiyan_local_footprint()])
             do {
-                let ms = try await engine.load(directory: selected.directory, profile:selected)
+                let ms = try await engine.load(directory: selected.directory, profile:selected, useReadCache:prefillReadCacheEnabled)
                 loaded = true; record(["event":"model_loaded","loadMs":ms])
             } catch {
                 record(["event":"model_load_failed","error":error.localizedDescription,"availableBytes":huiyan_local_available_memory()])
@@ -83,7 +84,7 @@ final class LocalScreenLab: ObservableObject {
         Task {
             defer { if token == revision { busy = false } }
             do {
-                let ms = try await engine.load(directory: LocalModelStore.directory)
+                let ms = try await engine.load(directory: LocalModelStore.directory, useReadCache:prefillReadCacheEnabled)
                 guard token == revision else { return }
                 loaded = true
                 status = String(format: "模型已加载，用时%.1f秒。可以筛当前画面或选择照片。", ms / 1000)
