@@ -84,8 +84,8 @@ final class LocalScreenReminderBridge {
       let selectedVoice = 'aliyun';
       window.__huiyanSetLocalScreenEnabled = (value, voice = 'aliyun') => {
         enabled = value === true;
-        selectedVoice = voice === 'google' ? 'google' : 'aliyun';
-        window.__huiyanConditionalLiveSelect?.(enabled && selectedVoice === 'google');
+        selectedVoice = ['google','googleLocal'].includes(voice) ? voice : 'aliyun';
+        window.__huiyanConditionalLiveSelect?.(enabled && selectedVoice !== 'aliyun', selectedVoice === 'googleLocal');
       };
       window.__huiyanLocalScreenReply = reply => {
         const entry = pending.get(reply.id);
@@ -99,7 +99,7 @@ final class LocalScreenReminderBridge {
       };
       window.fetch = async (input, init = {}) => {
         const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url, location.href);
-        if (enabled && selectedVoice === 'google' && url.origin === location.origin && url.pathname === '/api/gemini-browser-config') {
+        if (enabled && selectedVoice !== 'aliyun' && url.origin === location.origin && url.pathname === '/api/gemini-browser-config') {
           const response = await originalFetch(input, init);
           if (response.ok) {
             const config = await response.clone().json();
@@ -111,7 +111,7 @@ final class LocalScreenReminderBridge {
         }
         if (!enabled || url.origin !== location.origin || url.pathname !== '/api/active-reminder-check'
             || String(init.method || 'GET').toUpperCase() !== 'POST' || typeof init.body !== 'string') return originalFetch(input, init);
-        const expectedTransport = selectedVoice === 'google' ? 'browser-direct' : 'aliyun-realtime';
+        const expectedTransport = selectedVoice !== 'aliyun' ? 'browser-direct' : 'aliyun-realtime';
         if (typeof appState === 'undefined' || appState.geminiReminder?.transport !== expectedTransport) return originalFetch(input, init);
         const body = JSON.parse(init.body);
         const reminder = appState.geminiReminder;
@@ -146,11 +146,16 @@ final class LocalScreenReminderBridge {
           // Mechanical projection of the existing accepted contract, never a new
           // contract or a keyword-based decision about the user's intent.
           const fields = String(body.task || '').match(/category=(target_presence|state_tracking)[；;]mode=(appear|result_reached|state_changed)[；;]lifecycle=([^；;]+)[；;]target=([^；;]+)[；;]condition=([^；;]+)[；;]/);
-          const prompt = fields
+          let prompt = fields
             ? '主体：' + fields[4] + '\n' + (fields[2] === 'state_changed'
               ? '核验可观察性：当前图能可靠观察以下状态维度：' + fields[5]
               : '核验条件：' + fields[5])
             : '核验条件：' + body.task;
+          if (voice === 'googleLocal') {
+            const prepared = await jsonPost('/api/active-reminder-direct-prepare',{...body,modelProvider:'local-minicpm1b'});
+            if (!prepared.prompt || !owns() || controller.signal.aborted) throw new Error('本地完整筛图合同已过期或不完整。');
+            prompt = prepared.prompt;
+          }
           if (controller.signal.aborted) throw new Error('本地筛图超过20秒或已经取消');
           const nativeResult = await new Promise((resolve,reject) => {
             const onAbort = () => { pending.delete(id); reject(new Error('本地筛图超过20秒或已经取消')); };
@@ -161,6 +166,17 @@ final class LocalScreenReminderBridge {
           });
           if (!nativeResult.withinBudget || controller.signal.aborted || !owns()) throw new Error('本地筛图超过20秒或已经取消');
           const decision = String(nativeResult.modelText || '').trim();
+          if (voice === 'googleLocal') {
+            const parsed = JSON.parse(decision);
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('本地完整筛图未返回有效JSON对象。');
+            const result = await jsonPost('/api/active-reminder-direct-finalize',{...body,
+              modelText:decision,modelLatencyMs:nativeResult.modelLatencyMs,modelProvider:'local-minicpm1b'});
+            if (!owns() || controller.signal.aborted) throw new Error('本地完整筛图结果已过期。');
+            log('local_screening.result',{frameCount:body.frameCount,task:body.task,voice,model:nativeResult.model,
+              localScreenLatencyMs:nativeResult.modelLatencyMs,latencyMs:performance.now()-start,
+              state:result.state,shouldAlert:result.shouldAlert,transport:'native-local-1b-authority'});
+            return new Response(JSON.stringify({...result,localAuthority:true}),{status:200,headers:{'Content-Type':'application/json'}});
+          }
           if (!['Y','N'].includes(decision)) throw new Error('本地筛图未返回有效的是或否');
           const localModel = nativeResult.model === 'MiniCPM-V-4.7-1B' ? nativeResult.model : 'MiniCPM-V-4.7-35B-A3B';
           const descriptionStart = performance.now();
@@ -172,7 +188,7 @@ final class LocalScreenReminderBridge {
               : await jsonPost('/api/active-reminder-local-describe', {...body,localDecision:'Y',localScreenLatencyMs:nativeResult.modelLatencyMs,localScreenModel:localModel})
             : await jsonPost('/api/active-reminder-direct-finalize', {...body,modelText:'N',
               modelLatencyMs:nativeResult.modelLatencyMs,modelProvider:localModel === 'MiniCPM-V-4.7-1B' ? 'local-minicpm1b' : 'local-minicpm35b'});
-          if (controller.signal.aborted || !owns()) throw new Error('本地筛图结果已过期');
+          if ((controller.signal.aborted || !owns()) && !(result.liveReviewHandled && result.liveSpoke)) throw new Error('本地筛图结果已过期');
           log('local_screening.result',{frameCount:body.frameCount,task:body.task,latencyMs:performance.now()-start,
             budgetMs:20000,promptChars:prompt.length,systemPrefixReused:true,localDecision:decision,
             localScreenLatencyMs:nativeResult.modelLatencyMs,descriptionLatencyMs:decision === 'Y' ? performance.now()-descriptionStart : 0,

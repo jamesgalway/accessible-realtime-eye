@@ -2,7 +2,7 @@ import PhotosUI
 import SwiftUI
 import UIKit
 
-enum LocalReminderVoice: String { case aliyun, google }
+enum LocalReminderVoice: String { case aliyun, google, googleLocal }
 
 @MainActor
 final class LocalScreenLab: ObservableObject {
@@ -50,7 +50,7 @@ final class LocalScreenLab: ObservableObject {
         reminderVoice = voice
         localReminders = true
         status = "\(profile.shortName)本地主动提醒实验已启用。返回阿里慧眼说提醒条件，筛图期间请保留应用在前台。三秒总延迟仍需实测。"
-        record(["event":"local_reminders_enabled","voice":voice.rawValue,"liveTransport":voice == .google ? "browser-direct" : "aliyun-realtime"])
+        record(["event":"local_reminders_enabled","voice":voice.rawValue,"liveTransport":voice == .aliyun ? "aliyun-realtime" : "browser-direct"])
     }
 
     func reminder(jpeg: Data, prompt: String, task: String, capturedAt: TimeInterval, requestID: String) async throws -> LocalScreenMeasurement {
@@ -59,7 +59,7 @@ final class LocalScreenLab: ObservableObject {
         guard !busy else { throw LocalScreenError.message("本地筛图还在处理上一张画面。") }
         busy = true; defer { busy = false }
         let result:LocalScreenMeasurement
-        do { result = try await engine.screen(jpeg: jpeg, condition: task, capturedAt: capturedAt, preparedPrompt: prompt,budgetMs:20_000) }
+        do { result = try await engine.screen(jpeg: jpeg, condition: task, capturedAt: capturedAt, preparedPrompt: prompt,budgetMs:20_000,structured:reminderVoice == .googleLocal) }
         catch {
             record(["event":"reminder_screen_failed","requestID":requestID,"error":error.localizedDescription])
             throw error

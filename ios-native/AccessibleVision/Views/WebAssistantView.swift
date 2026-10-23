@@ -162,6 +162,20 @@ struct WebAssistantView: View {
                     }
                     .disabled(localScreenStarting || localScreen.localReminders || screenSharingMode)
                     .buttonStyle(.borderedProminent)
+                    Button(localScreen.localReminders && localScreen.reminderVoice == .googleLocal ? "1B独立筛图谷歌播报已启用" : "1B独立筛图（谷歌只播报实验）") {
+                        localScreenStarting = true
+                        localScreenStatus = "正在准备1B独立筛图实验。"
+                        Task {
+                            defer { localScreenStarting = false }
+                            do {
+                                try await localScreen.enableReminders(profile:.dense1b, voice:.googleLocal)
+                                localScreenStatus = "1B独立筛图，应用判断是否触发，谷歌直连Live结合当前画面播报。"
+                                openAssistant(.googleVoice)
+                            } catch { localScreenStatus = error.localizedDescription }
+                        }
+                    }
+                    .disabled(localScreenStarting || localScreen.localReminders || screenSharingMode)
+                    .buttonStyle(.borderedProminent)
                     Button("关闭本地主动提醒") {
                         Task { await localScreen.unload(); localScreenStatus = "本地模型已卸载，后续沿用原筛图。" }
                     }.disabled(!localScreen.localReminders || localScreenStarting)

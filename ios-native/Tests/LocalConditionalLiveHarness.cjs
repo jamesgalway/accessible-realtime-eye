@@ -32,6 +32,8 @@ function create() {
 }
 (async()=>{
   const a=create();assert.match(a.c.buildGeminiLiveSystemInstruction(),/不调用任何工具/);
+  const english=create(), eng=english.check();english.message({outputText:'To maintain silence as the light is not turned on.',audioParts:[{data:'wrong-silence-reason'}],turnComplete:true});
+  assert.equal((await eng.promise).liveSpoke,false);assert.equal(english.played.length,0);assert.equal(english.r.alertedResultKeys.length,0);
   const negative=a.check();a.message({audioParts:[{data:'nonzero-untranscribed'}],outputText:'\u200b'});
   assert.equal(a.played.length,0);a.message({turnComplete:true});assert.equal((await negative.promise).liveSpoke,false);assert.equal(a.r.alertedResultKeys.length,0);
   const b=create(), positive=b.check();b.message({audioParts:[{data:'first'}]});assert.equal(b.played.length,0);
@@ -49,6 +51,19 @@ function create() {
   const error=create(), ep=error.check();error.c.handleGeminiLiveMessage(JSON.stringify({type:'gemini.error'}));await assert.rejects(ep.promise,/gemini.error/);assert.equal(error.closed,1);
   const busy=create();busy.r.turnInProgress=true;await assert.rejects(busy.check().promise,/当前回合/);assert.equal(busy.sent.length,0);
   const failure=create();await failure.c.runGeminiActiveReminderTick();assert.equal(failure.r.inFlight,false);assert.equal(failure.r.activeInFlightCount,0);
+  const authority=create();authority.c.__huiyanConditionalLiveSelect(true,true);
+  let memoryCalls=0, alertCalls=0;
+  authority.c.applyReliableActiveReminderEvidenceGuard=(_,result)=>result;
+  authority.c.applyActiveReminderStateMemory=(_,result)=>{memoryCalls++;return result;};
+  authority.c.sendGeminiLiveEvent=()=>{throw new Error('original speech must be replaced for this one call');};
+  const originalSend=authority.c.sendGeminiLiveEvent;
+  authority.c.handleGeminiReminderAlert=()=>{alertCalls++;assert.equal(authority.c.sendGeminiLiveEvent({type:'say',text:'local result'}),true);};
+  authority.c.updateGeminiReminderMissState=()=>{};
+  authority.c.requestGeminiActiveReminderResult=async()=>({localAuthority:true,shouldAlert:true,observation:'本地看到的状态'});
+  await authority.c.runGeminiActiveReminderTick();
+  assert.equal(memoryCalls,1);assert.equal(alertCalls,1);assert.equal(authority.sent.length,1);
+  assert.ok(JSON.stringify(authority.sent).includes('[命中播报]'));assert.ok(!JSON.stringify(authority.sent).includes('[检查画面]'));
+  assert.equal(authority.c.sendGeminiLiveEvent,originalSend);assert.match(authority.c.buildGeminiLiveSystemInstruction(),/无需再检查条件/);
   failure.c.__huiyanConditionalLiveSelect(false);await failure.c.runGeminiActiveReminderTick();assert.equal(failure.baseTicks,1);
   assert.equal(failure.c.buildGeminiLiveSystemInstruction(),'original contract rules');
   console.log('PASS conditional Live: empty/format-only audio gate, ordered streaming, duplicate/stale/abort/input isolation, ordinary speech restored, timeout closes, tick release, old routes unchanged.');

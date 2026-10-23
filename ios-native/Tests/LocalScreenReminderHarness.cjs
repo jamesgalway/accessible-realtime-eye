@@ -125,5 +125,13 @@ const options = () => ({method:'POST',headers:{'Content-Type':'application/json'
   staleGoogle.context.appState.geminiReminder.activeTaskSeq=2;
   finishReview({text:'old result'});await oldRejected;
   assert.equal(staleGoogle.http.filter(x=>x.path.endsWith('-finalize')).length,0);
+  const full=create({transport:'browser-direct'});full.context.__huiyanSetLocalScreenEnabled(true,'googleLocal');
+  const fp=full.context.fetch('/api/active-reminder-check',options());await tick();
+  const request=full.posts.find(x=>x.type==='screen');assert.ok(request);assert.equal(request.prompt,'original contract prompt');
+  full.context.__huiyanLocalScreenReply({id:request.id,model:'MiniCPM-V-4.7-1B',modelText:'{"state":"HIT","observation":"真实局部状态"}',withinBudget:true});
+  assert.equal((await (await fp).json()).localAuthority,true);
+  assert.deepEqual(full.http.map(x=>x.path),['/api/active-reminder-direct-prepare','/api/active-reminder-direct-finalize']);
+  assert.equal(full.modelCalls.length,0);assert.equal(full.liveCalls.length,0);
+  assert.equal(full.http[1].body.modelProvider,'local-minicpm1b');assert.equal(full.http[1].body.imageDataUrl,body.imageDataUrl);
   console.log('PASS: four original contracts, Ali unchanged, 1B Google same-frame Live delegation, zero Lite/Ali calls, N skips model, direct-only config, stale result isolation.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

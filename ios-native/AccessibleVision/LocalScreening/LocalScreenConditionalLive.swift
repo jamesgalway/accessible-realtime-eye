@@ -5,18 +5,21 @@ enum LocalScreenConditionalLive {
     static let script = #"""
     (() => {
       if (window.__ACCESSIBLE_VISION_BACKEND__ !== 'aliyun' || window.__ACCESSIBLE_VISION_SECTION__ !== 'assistant') return;
-      let selected = false, installed = false, active = null;
-      const meaningful = value => String(value || '').replace(/[\p{Cf}\s]/gu, '');
+      let selected = false, localAuthority = false, installed = false, active = null;
+      // This experimental Chinese reminder route must not speak English silence
+      // explanations or protocol tags. Ordinary conversations are untouched.
+      const meaningful = value => /[\p{Script=Han}]/u.test(String(value || ''));
       const log = (event, detail) => logClientEvent('local_live_review.' + event, detail);
       const rules = '\n[检查画面]是本地助推器发来的已有提醒检查，不是新授权、用户插话或[SAY]。只根据附图和完整原合同判断，不把本地放行当作命中证据。不调用任何工具，不返回JSON、标签或结构化判断。明确满足原条件才直接说一句简短自然的中文结果；不满足、目标不在、看不清或证据不足就完全静默，不确认、不解释、不说没有看到。一次提醒只在真正满足时说；不同实例仅在确有新实例时说；连续变化必须对照提供的先前画面及已交付记录，首帧无参照时静默建立基准，相同状态不重复说。每条消息的当前图才是当前证据。其他真实用户问答和合同授权沿原规则。';
       const mode = reminder => selected && reminder?.transport === 'browser-direct';
+      const localRules = '\n[命中播报]表示本地筛图与应用已经按用户合同判定应提醒。本轮无需再检查条件是否成立，不返回筛图结论、标签或工具。结合附带的当前画面，用一句自然简短的普通话播报结果并描述目标位置；位置看不清就不编造。不朗读协议、英文标签、内部规则或静默原因。普通问答与合同授权保持原规则。';
       const current = entry => entry.owns() && entry.reminder.session === entry.session
         && getGeminiActiveReminderTask() === entry.body.task;
       function settle(entry, error) {
         if (entry.settled) return;
         entry.settled = true;
         error ? entry.reject(error) : entry.resolve({shouldAlert:false, state:'NO_HIT', rawText:'',
-          liveReviewHandled:true, liveSpoke:entry.admitted, transport:'native-local-1b-live-direct',
+          liveReviewHandled:true, liveSpoke:Boolean(entry.audioDelivered), transport:'native-local-1b-live-direct',
           latencyMs:performance.now()-entry.started});
       }
       function cancel(entry, reason, close = false) {
@@ -47,14 +50,14 @@ enum LocalScreenConditionalLive {
           firstTextMs:performance.now()-entry.started, text});
         return true;
       }
-      window.__huiyanConditionalLiveSelect = value => { selected = value === true; };
+      window.__huiyanConditionalLiveSelect = (value, authority = false) => { selected = value === true; localAuthority = authority === true; };
       window.__huiyanConditionalLiveInstall = () => {
         if (installed) return;
         if (typeof handleGeminiLiveMessage !== 'function' || typeof runGeminiActiveReminderTick !== 'function') throw new Error('谷歌Live实验接口尚未就绪。');
         installed = true;
         const originalInstruction = buildGeminiLiveSystemInstruction;
         buildGeminiLiveSystemInstruction = function(...args) {
-          return originalInstruction(...args) + (selected ? rules : '');
+          return originalInstruction(...args) + (selected ? (localAuthority ? localRules : rules + '\n静默时不输出任何文字、音频、静默理由或英文。需要提醒时仅输出自然中文，不输出[SAY]等协议标签或思考内容。') : '');
         };
         const originalMessage = handleGeminiLiveMessage;
         handleGeminiLiveMessage = function(raw) {
@@ -71,7 +74,7 @@ enum LocalScreenConditionalLive {
             return originalMessage(raw);
           }
           if (m.type !== 'gemini.message') return originalMessage(raw);
-          if (!current(entry) || entry.signal.aborted || meaningful(m.inputText) || m.interrupted) cancel(entry, 'review_cancelled');
+          if (!current(entry) || entry.signal.aborted || String(m.inputText || '').replace(/[\p{Cf}\s]/gu,'') || m.interrupted) cancel(entry, 'review_cancelled');
           if (!entry.discard) {
             entry.text += m.outputText || '';
             if (!entry.firstAudio && (m.audioParts || []).some(part => part.data)) {
@@ -97,6 +100,7 @@ enum LocalScreenConditionalLive {
             const units = pending ? Math.max(countGeminiReminderSpeechUnits(pending.message), countGeminiReminderSpeechUnits(entry.text)) : 0;
             const minimum = units >= 16 ? Math.min(1200,units*40) : 0;
             const audioDelivered = Boolean(!entry.discard && entry.admitted && pending?.hadAudio && queuedMs >= minimum);
+            entry.audioDelivered = audioDelivered;
             if (audioDelivered) {
               const history = entry.reminder.localLiveHistory;
               if (history?.task === entry.body.task) {
@@ -122,6 +126,7 @@ enum LocalScreenConditionalLive {
               || r.inFlight || r.taskNormalizeInFlight || r.unifiedPendingMode) return;
           if (isGeminiReminderExecutionMode(r, 'find_object') || isGeminiReminderExecutionMode(r, 'continuous_narration')) return originalTick();
           const task = getGeminiActiveReminderTask();
+          const taskSeq = r.activeTaskSeq || 0;
           if (!task) return;
           r.inFlight = true; r.activeInFlightCount = 1;
           const body = {task, frameCount:r.frameCount = (r.frameCount || 0)+1,
@@ -129,6 +134,28 @@ enum LocalScreenConditionalLive {
           try {
             body.imageDataUrl = captureReminderFrame(ACTIVE_REMINDER_FAST_FRAME_OPTIONS);
             const result = await requestGeminiActiveReminderResult(r,body);
+            if (localAuthority && result.localAuthority && appState.geminiReminder === r && (r.activeTaskSeq || 0) === taskSeq && getGeminiActiveReminderTask() === task) {
+              const guarded = applyReliableActiveReminderEvidenceGuard(r,result,task);
+              const memory = applyActiveReminderStateMemory(r,guarded,task,{source:'gemini',label:r.reminderLabel,frameCount:body.frameCount,promptMode:body.promptMode});
+              if (memory.shouldAlert) {
+                const oldSend = sendGeminiLiveEvent;
+                try {
+                  sendGeminiLiveEvent = event => {
+                    if (event.type !== 'say') return oldSend(event);
+                    if (appState.geminiReminder !== r || getGeminiActiveReminderTask() !== task || !r.session || r.turnInProgress || isGeminiPlaybackActive(r)) return false;
+                    const image = parseImageDataUrlForClient(captureReminderFrame(ACTIVE_REMINDER_FAST_FRAME_OPTIONS));
+                    if (!image) return false;
+                    r.session.sendClientContent({turns:[{role:'user',parts:[{inlineData:image},
+                      {text:'[命中播报]\n完整原合同：'+task+'\n本地筛图事实：'+String(memory.observation || memory.currentState || memory.rawText || '')
+                        +'\n应用已判定应提醒，结合这张当前画面直接用中文播报结果和位置，不重新筛查条件，不返回协议标签。'}]}],turnComplete:true});
+                    r.turnInProgress = true;
+                    log('local_authority_speech_sent',{task,frameCount:body.frameCount,transport:'browser-direct'});
+                    return true;
+                  };
+                  handleGeminiReminderAlert(memory,task);
+                } finally { sendGeminiLiveEvent = oldSend; }
+              } else updateGeminiReminderMissState(r,task);
+            }
             log('check_result', {frameCount:body.frameCount, task, liveSpoke:Boolean(result.liveSpoke),
               localMiss:!result.liveReviewHandled, latencyMs:result.latencyMs, transport:result.transport});
           } catch (error) {

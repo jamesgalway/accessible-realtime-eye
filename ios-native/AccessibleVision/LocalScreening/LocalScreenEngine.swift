@@ -226,7 +226,7 @@ final class LocalScreenEngine: @unchecked Sendable {
         }
     }
 
-    func screen(jpeg: Data, condition: String, capturedAt: TimeInterval, preparedPrompt: String? = nil, budgetMs: Double = 3500) async throws -> LocalScreenMeasurement {
+    func screen(jpeg: Data, condition: String, capturedAt: TimeInterval, preparedPrompt: String? = nil, budgetMs: Double = 3500, structured: Bool = false) async throws -> LocalScreenMeasurement {
         let token = nextRevision()
         return try await withCheckedThrowingContinuation { continuation in
             queue.async { [self] in
@@ -245,6 +245,8 @@ final class LocalScreenEngine: @unchecked Sendable {
                     let prefixStarted = ProcessInfo.processInfo.systemUptime
                     var taskPrefixReused = false
                     let ready: Bool
+                    let rules = structured ? "你是当前图片的视觉筛查器。严格按本轮完整合同和输出格式返回紧凑JSON。仅报告当前图可见事实，不生成授权、声音或应用指令，不编造先前状态。不确定、看不清或未满足时如实报告。连续变化只输出当前状态，由应用比较；实例标识根据实际可见特征保持稳定。" : Self.reminderSystem
+                    guard rules.withCString({ mb_mtmd_local_prepare_system(context,$0) }) else { throw LocalScreenError.message("本地筛图规则准备失败。") }
                     if let preparedPrompt {
                         ready = preparedPrompt.withCString { mb_mtmd_local_prepare_task(context,$0,&taskPrefixReused) }
                     } else { ready = mb_mtmd_clean_kv_cache(context) }
@@ -267,7 +269,7 @@ final class LocalScreenEngine: @unchecked Sendable {
                         throw LocalScreenError.message(String(cString: mb_mtmd_get_last_error(context)))
                     }
                     var raw = "", firstToken = 0.0
-                    for _ in 0..<12 {
+                    for _ in 0..<(structured ? 256 : 12) {
                         guard current(token) else { throw CancellationError() }
                         let output = mb_mtmd_loop(context)
                         if let text = output.token {
@@ -275,7 +277,8 @@ final class LocalScreenEngine: @unchecked Sendable {
                             raw += String(cString: text); mb_mtmd_string_free(text)
                         }
                         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if output.is_end || (preparedPrompt != nil && ["Y","N"].contains(trimmed)) || (preparedPrompt == nil && ["HIT", "NO_HIT", "UNCERTAIN"].contains(trimmed)) { break }
+                        let jsonComplete = structured && trimmed.hasPrefix("{") && trimmed.hasSuffix("}") && ((try? JSONSerialization.jsonObject(with:Data(trimmed.utf8))) as? [String:Any]) != nil
+                        if output.is_end || jsonComplete || (!structured && ((preparedPrompt != nil && ["Y","N"].contains(trimmed)) || (preparedPrompt == nil && ["HIT", "NO_HIT", "UNCERTAIN"].contains(trimmed)))) { break }
                     }
                     guard current(token) else { throw CancellationError() }
                     let total = (ProcessInfo.processInfo.systemUptime - capturedAt) * 1000
