@@ -131,9 +131,12 @@ final class LocalScreenReminderBridge {
           if (recovering && !valid(recovering)) recovering = null;
           if (['proxy.error','proxy.closed'].includes(message.type)) { staged = null; recovering = null; }
           const r = appState.activeReminder, rt = appState.realtime;
+          if (rt?.suppressAssistantOutputUntilManualCommit) { staged = null; recovering = null; }
           const decision = enabled && selectedVoice === 'aliyun'
+            && !rt?.suppressAssistantOutputUntilManualCommit
             && isAliCheapDirectFunctionContractExperiment()
-            && r?.pendingTaskSetupTranscript && !rt?.aliCheapContractConfirmationInFlight;
+            && ((r?.pendingTaskSetupTranscript && !rt?.aliCheapContractConfirmationInFlight)
+              || rt?.pendingAliCheapToolResult);
           const output = ['response.audio.delta','response.audio_transcript.delta','response.audio_transcript.done',
             'response.text.delta','response.text.done','response.audio.done'].includes(message.type);
           if (decision && output) {

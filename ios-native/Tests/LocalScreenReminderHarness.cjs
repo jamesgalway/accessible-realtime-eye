@@ -55,6 +55,7 @@ function decisionTurn(outcome = 'accepted') {
         r.pendingTaskSetupTranscript='';
         if(outcome!=='ordinary') void c.startSpeedReminderTaskNormalizeFromConfirmation('request','',{confirmOnAccepted:true});
       }
+      if(m.type==='response.done') rt.pendingAliCheapToolResult=null;
     },
     startSpeedReminderTaskNormalizeFromConfirmation:async()=>{
       const accepted = await new Promise(resolve=>{resolveRecovery=resolve;});
@@ -75,7 +76,8 @@ function decisionTurn(outcome = 'accepted') {
   const ordinary=decisionTurn('ordinary');await ordinary.send('response.audio.delta','ordinary answer');
   await ordinary.send('response.done');assert.deepEqual(ordinary.played,['ordinary answer']);
   const tool=decisionTurn();await tool.send('response.audio.delta','before tool');
-  await tool.send('response.function_call_arguments.done');await tool.send('response.done');
+  await tool.send('response.function_call_arguments.done');
+  await tool.send('response.audio.delta','before function output');await tool.send('response.done');
   await tool.send('response.audio.delta','tool accepted confirmation');assert.deepEqual(tool.played,['tool accepted confirmation']);
   const replaced=decisionTurn();await replaced.send('response.audio.delta','old');await replaced.send('response.done');
   replaced.rt.aliCheapContractCandidateSeq++;replaced.finish(false);await tick();assert.deepEqual(replaced.played,[]);
