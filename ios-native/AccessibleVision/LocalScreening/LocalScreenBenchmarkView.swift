@@ -32,7 +32,8 @@ struct LocalScreenBenchmarkView: View {
             guard fixtureData.count <= 10_000 else { throw LocalScreenError.message("对照配置过大。") }
             let fixture = try JSONDecoder().decode(Fixture.self, from: fixtureData)
             guard let profile = LocalScreenProfile(rawValue:fixture.model ?? "35b") else { throw LocalScreenError.message("对照模型无效。") }
-            output = directory.appendingPathComponent("result-\(profile == .dense1b ? "1b-" : "")io\(LocalScreenEngine.ioThreads).json")
+            let readCacheRequested = profile == .moe35b && ProcessInfo.processInfo.arguments.contains("-huiyan35bPrefillReadCache")
+            output = directory.appendingPathComponent("result-\(profile == .dense1b ? "1b-" : "")io\(LocalScreenEngine.ioThreads)\(readCacheRequested ? "-readcache" : "").json")
             report["model"] = profile.identifier
             guard !fixture.prompt.isEmpty, fixture.prompt.count <= 1200, (1...4).contains(fixture.samples) else {
                 throw LocalScreenError.message("对照配置无效。")
@@ -42,6 +43,8 @@ struct LocalScreenBenchmarkView: View {
             report["imageSHA256"] = SHA256.hash(data: jpeg).map { String(format: "%02x", $0) }.joined()
             report["promptSHA256"] = SHA256.hash(data: Data(fixture.prompt.utf8)).map { String(format: "%02x", $0) }.joined()
             report["loadMs"] = try await engine.load(directory: profile.directory,profile:profile)
+            let planURL = directory.deletingLastPathComponent().appendingPathComponent("local-screen-memory-plan.json")
+            report["memoryPlan"] = try JSONSerialization.jsonObject(with: Data(contentsOf: planURL))
             var samples = [[String: Any]]()
             for index in 0..<fixture.samples {
                 guard !Task.isCancelled, UIApplication.shared.applicationState == .active else { throw CancellationError() }

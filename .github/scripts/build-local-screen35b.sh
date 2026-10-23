@@ -13,6 +13,9 @@ git -C "$SOURCE" submodule update --init --depth 1 llama.cpp-omni
 test "$(git -C "$SOURCE/llama.cpp-omni" rev-parse HEAD)" = "$ENGINE_SHA"
 python3 "$ROOT/.github/scripts/patch-local-vision-allocation.py" "$SOURCE/llama.cpp-omni" "$RUNNER_TEMP/local-vision-engine-patch.json"
 python3 "$ROOT/ios-native/Tests/test-local-vision-allocation.py" "$SOURCE/llama.cpp-omni" "$RUNNER_TEMP/local-vision-allocation-test"
+python3 "$ROOT/.github/scripts/patch-local-prefill-read-cache.py" "$SOURCE/llama.cpp-omni" "$RUNNER_TEMP/prefill-read-cache-patch.json"
+clang++ -std=c++17 -Wall -Wextra -pthread -fsanitize=address,undefined -I"$SOURCE/llama.cpp-omni/src" "$ROOT/ios-native/Tests/PrefillReadCacheHarness.cpp" -o "$RUNNER_TEMP/prefill-read-cache-test"
+"$RUNNER_TEMP/prefill-read-cache-test"
 
 DEST="$ROOT/ios-native/LocalScreeningFramework"
 mkdir -p "$DEST"
@@ -29,6 +32,7 @@ done
 cp "$SOURCE/LICENSE" "$ROOT/ios-native/AccessibleVision/LocalScreening/ThirdParty-NOTICES.txt"
 python3 "$ROOT/ios-native/Tests/verify-local-screen-catalog.py"
 cp "$RUNNER_TEMP/local-vision-engine-patch.json" "$BRIDGE/engine-allocation-patch.json"
+cp "$RUNNER_TEMP/prefill-read-cache-patch.json" "$BRIDGE/prefill-read-cache-patch.json"
 python3 "$ROOT/.github/scripts/patch-local-vision-ubatch.py" "$BRIDGE" "$BRIDGE/bridge-ubatch-patch.json"
 python3 "$ROOT/ios-native/Tests/test-local-vision-ubatch.py" "$BRIDGE" "$RUNNER_TEMP/local-vision-ubatch-test"
 python3 "$ROOT/.github/scripts/patch-local-screen-session.py" "$BRIDGE"

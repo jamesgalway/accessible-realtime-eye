@@ -115,6 +115,14 @@ final class LocalScreenEngine: @unchecked Sendable {
                     let reserve: Int64 = 2440 * 1_048_576
                     let affordable = max(0, Int((headroom - reserve) / slotBytes))
                     cacheSlots = profile == .dense1b ? 0 : min(32, max(0, affordable - 8) / 8 * 8)
+                    // Offline-only experiment: replace the unused prefill-time
+                    // decode windows with a smaller immutable CPU byte cache.
+                    // Normal entries keep the installed batching/LES defaults.
+                    let readCacheRequested = profile == .moe35b && ProcessInfo.processInfo.arguments.contains("-huiyanLocalScreenBenchmark")
+                        && ProcessInfo.processInfo.arguments.contains("-huiyan35bPrefillReadCache")
+                    let readCacheSlots = readCacheRequested ? cacheSlots : 0
+                    if readCacheRequested { cacheSlots = 0 }
+                    setenv("HUIYAN_MOE_PREFILL_READ_CACHE", String(readCacheSlots), 1)
                     params.moe_lookahead_prefetch_depth = cacheSlots > 0 ? 8 : 0
                     params.moe_decode_window = Int32(cacheSlots)
                     // Static decode prewarm costs ~0.5s per frame and is not
@@ -126,7 +134,8 @@ final class LocalScreenEngine: @unchecked Sendable {
                     var plan: [String:Any] = ["ioThreads":Self.ioThreads,"availableBytes":available,"footprintBytes":footprint,"physicalBytes":ProcessInfo.processInfo.physicalMemory,
                         "model":profile.identifier,"modelVersion":profile.version,
                         "headroomBytes":headroom,"reserveBytes":reserve,"cacheSlots":cacheSlots,"ubatch":256,"activeExpertsPerLayer":profile == .dense1b ? 0 : 8,
-                        "lookaheadPrefetchDepth":params.moe_lookahead_prefetch_depth,"expertPrewarmLevel":0]
+                        "lookaheadPrefetchDepth":params.moe_lookahead_prefetch_depth,"expertPrewarmLevel":0,
+                        "prefillReadCacheRequested":readCacheRequested,"prefillReadCacheSlots":readCacheSlots]
                     let planURL = FileManager.default.urls(for:.documentDirectory,in:.userDomainMask)[0].appendingPathComponent("local-screen-memory-plan.json")
                     try? JSONSerialization.data(withJSONObject:plan,options:[.sortedKeys]).write(to:planURL,options:.atomic)
                     let model = directory.appendingPathComponent(profile.modelFile).path
