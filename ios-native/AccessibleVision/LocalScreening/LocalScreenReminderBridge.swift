@@ -85,7 +85,6 @@ final class LocalScreenReminderBridge {
       window.__huiyanSetLocalScreenEnabled = (value, voice = 'aliyun') => {
         enabled = value === true;
         selectedVoice = voice === 'google' ? 'google' : 'aliyun';
-        window.__huiyanConditionalLiveSelect?.(enabled && selectedVoice === 'google');
       };
       window.__huiyanLocalScreenReply = reply => {
         const entry = pending.get(reply.id);
@@ -175,7 +174,6 @@ final class LocalScreenReminderBridge {
           if (response.ok) {
             const config = await response.clone().json();
             if (config.transport !== 'browser-direct') throw new Error('1B谷歌声音实验需要手机直连，请检查原生权限和直连配置。');
-            window.__huiyanConditionalLiveInstall();
             log('local_screening.google_direct_config',{transport:config.transport,model:config.model,voice:config.voice});
           }
           return response;
@@ -208,10 +206,31 @@ final class LocalScreenReminderBridge {
           return response.json();
         };
         const googleReview = async localMs => {
-          if (typeof window.__huiyanConditionalLiveReview === 'function') {
-            return window.__huiyanConditionalLiveReview({body,reminder,owns,signal:controller.signal,localMs});
-          }
-          throw new Error('谷歌Live看图播报实验尚未安装。');
+          if (!reminder.browserGeminiAi?.models || !owns() || controller.signal.aborted) throw new Error('谷歌手机直连尚未就绪或任务已更换。');
+          const modelProvider = 'local-minicpm1b-google';
+          const prepared = await jsonPost('/api/active-reminder-direct-prepare', {...body,modelProvider});
+          if (!owns() || controller.signal.aborted) throw new Error('谷歌复核任务已过期。');
+          const image = typeof parseImageDataUrlForClient === 'function' ? parseImageDataUrlForClient(body.imageDataUrl) : null;
+          if (!image || !prepared.model || !prepared.prompt) throw new Error('谷歌直连复核资料不完整。');
+          const pool = reminder.browserActiveReminderAiPool?.length ? reminder.browserActiveReminderAiPool : [reminder.browserGeminiAi];
+          const slot = (Math.max(1,Number(body.requestSeq || body.frameCount || 1))-1) % pool.length;
+          const googleController = new AbortController();
+          const cancelGoogle = () => googleController.abort();
+          controller.signal.addEventListener('abort',cancelGoogle,{once:true});
+          const reviewTimer = setTimeout(cancelGoogle,Math.max(1000,Math.min(15000,Number(prepared.timeoutMs || reminder.browserImageRequestTimeoutMs || 3500))));
+          const reviewStart = performance.now();
+          let response;
+          try {
+            response = await pool[slot].models.generateContent({model:prepared.model,
+              contents:[{role:'user',parts:[{text:prepared.prompt},{inlineData:image}]}],
+              config:{temperature:0,maxOutputTokens:Number(prepared.maxOutputTokens || 160),thinkingConfig:{thinkingBudget:0},
+                ...(prepared.jsonMode ? {responseMimeType:'application/json'} : {}),abortSignal:googleController.signal}});
+          } finally { clearTimeout(reviewTimer); controller.signal.removeEventListener('abort',cancelGoogle); }
+          if (!owns() || controller.signal.aborted || googleController.signal.aborted) throw new Error('谷歌直连复核已超时或过期。');
+          const modelText = String(response?.text || '').trim();
+          if (!modelText) throw new Error('谷歌直连未返回有效复核结果。');
+          return jsonPost('/api/active-reminder-direct-finalize',{...body,modelProvider,modelText,
+            modelLatencyMs:localMs+performance.now()-reviewStart,browserKeySlot:slot+1});
         };
         try {
           // Mechanical projection of the existing accepted contract, never a new
@@ -243,7 +262,7 @@ final class LocalScreenReminderBridge {
               : await jsonPost('/api/active-reminder-local-describe', {...body,localDecision:'Y',localScreenLatencyMs:nativeResult.modelLatencyMs,localScreenModel:localModel})
             : await jsonPost('/api/active-reminder-direct-finalize', {...body,modelText:'N',
               modelLatencyMs:nativeResult.modelLatencyMs,modelProvider:localModel === 'MiniCPM-V-4.7-1B' ? 'local-minicpm1b' : 'local-minicpm35b'});
-          if ((controller.signal.aborted || !owns()) && !(result.liveReviewHandled && result.liveSpoke)) throw new Error('本地筛图结果已过期');
+          if (controller.signal.aborted || !owns()) throw new Error('本地筛图结果已过期');
           log('local_screening.result',{frameCount:body.frameCount,task:body.task,latencyMs:performance.now()-start,
             budgetMs:20000,promptChars:prompt.length,systemPrefixReused:true,localDecision:decision,
             localScreenLatencyMs:nativeResult.modelLatencyMs,descriptionLatencyMs:decision === 'Y' ? performance.now()-descriptionStart : 0,
