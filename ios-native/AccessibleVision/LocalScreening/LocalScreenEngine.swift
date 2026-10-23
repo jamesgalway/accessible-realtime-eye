@@ -236,6 +236,12 @@ final class LocalScreenEngine: @unchecked Sendable {
                     let remaining = budgetMs-(ProcessInfo.processInfo.systemUptime-capturedAt)*1000
                     guard remaining>0, begin(token,remainingMs:remaining) else { throw CancellationError() }
                     guard let context else { throw LocalScreenError.message("请先加载本地筛图模型。") }
+                    // Isolated offline comparison only. Normal launches and all
+                    // structured/1B requests retain the installed behavior.
+                    let fastBinary = !structured && preparedPrompt != nil && modelName == LocalScreenProfile.moe35b.identifier
+                        && ProcessInfo.processInfo.arguments.contains("-huiyan35bBinaryFastReturn")
+                    mb_mtmd_local_set_binary_fast_return(context,fastBinary)
+                    defer { mb_mtmd_local_set_binary_fast_return(context,false) }
                     let documents = FileManager.default.urls(for:.documentDirectory,in:.userDomainMask)[0]
                     let visionLog = documents.appendingPathComponent("local-screen-vision-screen.log").path
                     let metalLog = documents.appendingPathComponent("local-screen-metal-screen.log").path

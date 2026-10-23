@@ -1,0 +1,25 @@
+name: Check isolated 35B binary fast return
+on:
+  push:
+    branches: [ios-native-35b-fast-return-20261023]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch exact pinned bridge and apply scoped patches
+        run: |
+          mkdir -p "$RUNNER_TEMP/bridge"
+          for name in MBMtmd.h MBMtmd.mm; do
+            curl -fsSL "https://raw.githubusercontent.com/OpenBMB/MiniCPM-V-Apps/fa9d837e3d38dfde7a9484ec1cc6bc2e5bc9b420/MiniCPM-V-demo/MTMDWrapper/Bridge/$name" -o "$RUNNER_TEMP/bridge/$name"
+          done
+          python3 .github/scripts/patch-local-vision-ubatch.py "$RUNNER_TEMP/bridge" "$RUNNER_TEMP/bridge/bridge-ubatch-patch.json"
+          python3 .github/scripts/patch-local-screen-session.py "$RUNNER_TEMP/bridge"
+          python3 .github/scripts/patch-local-binary-fast-return.py "$RUNNER_TEMP/bridge"
+      - name: Check actual patched binary loop and existing session lifecycle
+        run: |
+          python3 ios-native/Tests/test-local-binary-fast-return.py "$RUNNER_TEMP/binary-test" "$RUNNER_TEMP/bridge"
+          python3 ios-native/Tests/test-local-screen-session.py "$RUNNER_TEMP/session-test" "$RUNNER_TEMP/bridge"
+          node ios-native/Tests/LocalScreenReminderHarness.cjs
+          node ios-native/Tests/LocalConditionalLiveHarness.cjs
