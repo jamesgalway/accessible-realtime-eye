@@ -114,7 +114,13 @@ final class LocalScreenEngine: @unchecked Sendable {
                     let headroom = max(0, min(available > 0 ? available : ceiling - footprint, ceiling - footprint))
                     let reserve: Int64 = 2440 * 1_048_576
                     let affordable = max(0, Int((headroom - reserve) / slotBytes))
-                    cacheSlots = profile == .dense1b ? 0 : min(32, max(0, affordable - 8) / 8 * 8)
+                    let prefillPlan = LocalScreenPrefillPlan(arguments: ProcessInfo.processInfo.arguments,
+                        is35B: profile == .moe35b, affordableSlots: affordable)
+                    cacheSlots = prefillPlan.cacheSlots
+                    params.n_ubatch = Int32(prefillPlan.microBatch)
+                    // The upstream graph builder and slot runtime share this
+                    // same bound. Never bypass either side's capacity checks.
+                    setenv("LLAMA_MOE_WINDOW_MAX_ROWS", String(prefillPlan.windowRows), 1)
                     params.moe_lookahead_prefetch_depth = cacheSlots > 0 ? 8 : 0
                     params.moe_decode_window = Int32(cacheSlots)
                     // Static decode prewarm costs ~0.5s per frame and is not
@@ -125,7 +131,8 @@ final class LocalScreenEngine: @unchecked Sendable {
                     if profile == .dense1b { params.moe_slot_bank = 0 }
                     var plan: [String:Any] = ["ioThreads":Self.ioThreads,"availableBytes":available,"footprintBytes":footprint,"physicalBytes":ProcessInfo.processInfo.physicalMemory,
                         "model":profile.identifier,"modelVersion":profile.version,
-                        "headroomBytes":headroom,"reserveBytes":reserve,"cacheSlots":cacheSlots,"ubatch":256,"activeExpertsPerLayer":profile == .dense1b ? 0 : 8,
+                        "headroomBytes":headroom,"reserveBytes":reserve,"cacheSlots":cacheSlots,"ubatch":prefillPlan.microBatch,"activeExpertsPerLayer":profile == .dense1b ? 0 : 8,
+                        "prefillExperimentRequested":prefillPlan.requested,"prefillMode":prefillPlan.mode,"windowMaxRows":prefillPlan.windowRows,
                         "lookaheadPrefetchDepth":params.moe_lookahead_prefetch_depth,"expertPrewarmLevel":0]
                     let planURL = FileManager.default.urls(for:.documentDirectory,in:.userDomainMask)[0].appendingPathComponent("local-screen-memory-plan.json")
                     try? JSONSerialization.data(withJSONObject:plan,options:[.sortedKeys]).write(to:planURL,options:.atomic)
@@ -160,6 +167,8 @@ final class LocalScreenEngine: @unchecked Sendable {
                                 cacheSlots = 0
                                 params.moe_decode_window = 0; params.moe_lookahead_prefetch_depth = 0
                                 params.moe_prewarm_level = 0; params.n_ubatch = 128
+                                setenv("LLAMA_MOE_WINDOW_MAX_ROWS", "1", 1)
+                                plan["prefillMode"] = "allocation-fallback"; plan["windowMaxRows"] = 1
                                 plan["cacheSlots"] = 0; plan["ubatch"] = 128
                                 plan["lookaheadPrefetchDepth"] = 0
                                 plan["gpuReducedCacheRetry"] = true

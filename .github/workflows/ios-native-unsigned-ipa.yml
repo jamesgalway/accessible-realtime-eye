@@ -76,6 +76,11 @@ jobs:
           clang++ -std=c++17 ios-native/Tests/LocalVisionFailureHarness.cpp -o "$RUNNER_TEMP/local-vision-failure-test"
           "$RUNNER_TEMP/local-vision-failure-test"
 
+      - name: Verify bounded offline prefill experiment
+        run: |
+          swiftc ios-native/AccessibleVision/LocalScreening/LocalScreenPrefillPlan.swift ios-native/Tests/LocalScreenPrefillPlan/main.swift -o "$RUNNER_TEMP/local-prefill-plan-test"
+          "$RUNNER_TEMP/local-prefill-plan-test"
+
       - name: Verify native JavaScriptCore compatibility
         # Unmodified build71 screen runtime: the existing macOS smoke reports
         # "did not complete: undefined". Keep it explicitly available without
